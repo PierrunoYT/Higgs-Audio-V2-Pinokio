@@ -1,0 +1,110 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+higgs_audio_env/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+.env/
+
+# Temporary installation directories
+temp_higgs/
+higgs-audio/
+
+# PyTorch
+*.pth
+*.pt
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# Environment configuration files
+.env
+
+# Audio files (common formats)
+*.wav
+*.mp3
+*.flac
+*.aac
+*.ogg
+*.m4a
+*.wma
+
+# Model files
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.bin
+*.safetensors
+
+# Hugging Face cache
+.cache/
+transformers_cache/
+
+# Data files
+data/
+datasets/
+*.csv
+*.json
+*.xml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradio
+.gradio/
+gradio_queue.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*_temp.*
+output*.wav
+generation*.wav
+
+# Generated audio outputs
+outputs/
+generated/
