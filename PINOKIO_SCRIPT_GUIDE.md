@@ -403,7 +403,7 @@ module.exports = {
         venv: "{{args && args.venv ? args.venv : null}}",
         path: "{{args && args.path ? args.path : '.'}}",
         message: [
-          "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 {{args && args.xformers ? 'xformers' : ''}} --index-url https://download.pytorch.org/whl/cu128",
+          "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 {{args && args.xformers ? 'xformers' : ''}} --index-url https://download.pytorch.org/whl/cu128 --force-reinstall --no-deps",
           "{{args && args.triton ? 'uv pip install -U triton-windows' : ''}}",
           "{{args && args.sageattention ? 'uv pip install https://github.com/woct0rdho/SageAttention/releases/download/v2.1.1-windows/sageattention-2.1.1+cu128torch2.7.0-cp310-cp310-win_amd64.whl' : ''}}"
         ]
@@ -455,7 +455,7 @@ module.exports = {
         venv: "{{args && args.venv ? args.venv : null}}",
         path: "{{args && args.path ? args.path : '.'}}",
         message: [
-          "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 {{args && args.xformers ? 'xformers' : ''}} --index-url https://download.pytorch.org/whl/cu128",
+          "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 {{args && args.xformers ? 'xformers' : ''}} --index-url https://download.pytorch.org/whl/cu128 --force-reinstall --no-deps",
           "{{args && args.sageattention ? 'uv pip install git+https://github.com/thu-ml/SageAttention.git' : ''}}"
         ]
       },
@@ -469,7 +469,7 @@ module.exports = {
       params: {
         venv: "{{args && args.venv ? args.venv : null}}",
         path: "{{args && args.path ? args.path : '.'}}",
-        message: "uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2.4"
+        message: "uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2.4 --force-reinstall --no-deps"
       },
       next: null
     },
@@ -496,6 +496,7 @@ The updated torch.js includes support for:
 - **PyTorch 2.7.0**: Latest version with performance improvements
 - **CUDA 12.8**: Latest CUDA support for NVIDIA GPUs
 - **UV Package Manager**: Lightning-fast installation speeds
+- **Force Reinstall**: `--force-reinstall --no-deps` ensures clean PyTorch installation without dependency conflicts
 - **XFormers**: Memory-efficient attention mechanisms (optional)
 - **Triton**: GPU kernel optimization for Windows (optional)
 - **SageAttention**: Advanced attention optimization (optional)
@@ -567,7 +568,7 @@ module.exports = {
   run: [{
     method: "fs.link",
     params: {
-      path: "app"
+      venv: "app/env"
     }
   }]
 }
@@ -886,6 +887,27 @@ module.exports = {
 
 **Result**: Your CUDA-optimized PyTorch 2.7.0 gets replaced with CPU-only torch==1.13.0!
 
+### The Enhanced Solution: Force Reinstall + No Deps
+
+The latest torch.js implementation uses `--force-reinstall --no-deps` flags to guarantee PyTorch installation integrity:
+
+```javascript
+// ✅ ENHANCED - Force reinstall without dependency conflicts
+{
+  method: "shell.run",
+  params: {
+    venv: "env",
+    path: "app", 
+    message: "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128 --force-reinstall --no-deps"
+  }
+}
+```
+
+**Why `--force-reinstall --no-deps`?**
+- `--force-reinstall`: Overwrites any existing PyTorch installation, even if "satisfied"
+- `--no-deps`: Prevents pip from installing unwanted dependencies that could conflict
+- **Combined**: Guarantees the exact PyTorch version you want, with no interference
+
 ### The Solution: PyTorch LAST
 
 ```javascript
@@ -1043,7 +1065,6 @@ your-pinokio-project/
 5. **Terminal Access**: Direct terminal access during running operations
 6. **State Tracking**: Monitors install, start, update, reset, and link operations
 7. **Generic Template**: Uses placeholders for easy customization (`<TITLE>`, `<ICON>`)
-8. **User Experience**: Clear status indicators and intuitive navigation
 
 ### Advanced Menu Features Demonstrated:
 
