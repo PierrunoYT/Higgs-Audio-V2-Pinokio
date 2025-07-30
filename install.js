@@ -49,16 +49,6 @@ module.exports = {
       }
     },
     
-    // Verify boson_multimodal installation
-    {
-      method: "shell.run",
-      params: {
-        venv: "env",
-        path: "app",
-        message: "python -c \"import boson_multimodal; print('boson_multimodal successfully installed')\""
-      }
-    },
-    
     
     // Install HuggingFace Hub for authentication (using UV for speed)
     {

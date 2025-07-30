@@ -1,6 +1,18 @@
 # How to Create a Pinokio Script
 
-This guide explains how to create a Pinokio script based on the Hunyuan3D-2-LowVRAM example. Pinokio is a package manager for AI applications that uses JavaScript configuration files to define installation, startup, and management workflows.
+This guide explains how to create a Pinokio script based on the Higgs Audio V2 Enhanced implementation. Pinokio is a package manager for AI applications that uses JavaScript configuration files to define installation, startup, and management workflows.
+
+## Higgs Audio V2 Enhanced - Real Implementation
+
+The Higgs Audio V2 Enhanced Pinokio package demonstrates advanced text-to-speech capabilities with:
+
+- **Multi-platform PyTorch support** (Windows NVIDIA/AMD, Linux NVIDIA/ROCm, macOS)
+- **UV package manager** for lightning-fast installations
+- **Gradio web interface** with proper event monitoring
+- **HuggingFace model downloads** without authentication requirements
+- **Proper installation order** to prevent PyTorch version conflicts
+- **Cross-platform file operations** for Windows and Unix-like systems
+- **Real-time status updates** and dynamic menu generation
 
 ## Core Files Structure
 
@@ -23,13 +35,14 @@ The main configuration file defines your project metadata and dynamic menu syste
 
 ```javascript
 const path = require('path')
+
 module.exports = {
   version: "1.0.0",
-  title: "Your Project Name",
-  description: "Description of your AI project",
+  title: "Higgs Audio V2 Enhanced",
+  description: "Advanced text-to-speech with voice cloning, multi-speaker support, and background music generation using Higgs Audio V2",
   icon: "icon.png",
   menu: async (kernel, info) => {
-    let installed = info.exists("app/env")  // Check if installed
+    let installed = info.exists("app/env")
     let running = {
       install: info.running("install.js"),
       start: info.running("start.js"),
@@ -42,7 +55,7 @@ module.exports = {
       return [{
         default: true,
         icon: "fa-solid fa-plug",
-        text: "Installing",
+        text: "Installing Higgs Audio V2...",
         href: "install.js",
       }]
     } else if (installed) {
@@ -51,31 +64,44 @@ module.exports = {
         if (local && local.url) {
           return [{
             default: true,
-            icon: "fa-solid fa-rocket",
-            text: "Open Web UI",
+            icon: "fa-solid fa-microphone",
+            text: "Open Higgs Audio Interface",
             href: local.url,
           }, {
             icon: 'fa-solid fa-terminal',
-            text: "Terminal",
+            text: "View Terminal",
+            href: "start.js",
+          }, {
+            icon: "fa-solid fa-stop",
+            text: "Stop Application",
+            href: "start.js",
+            params: { action: "stop" }
+          }]
+        } else {
+          return [{
+            default: true,
+            icon: "fa-solid fa-spinner fa-spin",
+            text: "Starting...",
             href: "start.js",
           }]
         }
       } else {
         // Main menu when installed but not running
         return [{
-          icon: "fa-solid fa-power-off",
-          text: "Start Application",
+          default: true,
+          icon: "fa-solid fa-play",
+          text: "Start Higgs Audio V2",
           href: "start.js"
         }, {
-          icon: "fa-solid fa-plug",
+          icon: "fa-solid fa-sync",
           text: "Update",
           href: "update.js",
         }, {
-          icon: "fa-solid fa-plug",
-          text: "Install",
+          icon: "fa-solid fa-download",
+          text: "Reinstall",
           href: "install.js",
         }, {
-          icon: "fa-regular fa-circle-xmark",
+          icon: "fa-solid fa-trash",
           text: "Reset",
           href: "reset.js",
         }]
@@ -84,8 +110,8 @@ module.exports = {
       // Not installed - show install option
       return [{
         default: true,
-        icon: "fa-solid fa-plug",
-        text: "Install",
+        icon: "fa-solid fa-download",
+        text: "Install Higgs Audio V2",
         href: "install.js",
       }]
     }
@@ -125,20 +151,49 @@ return [{
 
 ## 2. Installation Script (`install.js`)
 
-Defines the installation workflow:
+Defines the installation workflow using the proven installation order:
 
 ```javascript
 module.exports = {
   run: [
-    // Clone repository
+    // Clone the Higgs Audio V2 Enhanced repository
     {
       method: "shell.run",
       params: {
-        message: "git clone https://github.com/your-repo/project.git app"
+        message: "git clone https://github.com/PierrunoYT/HiggsAudio-V2-Local.git app"
       }
     },
     
-    // Install PyTorch (optional)
+    // Clone and install Higgs Audio package
+    {
+      method: "shell.run",
+      params: {
+        path: "app",
+        message: "git clone https://github.com/boson-ai/higgs-audio.git temp_higgs"
+      }
+    },
+    
+    // Install main app dependencies first (using UV for speed)
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "uv pip install -r requirements.txt"
+      }
+    },
+
+    // Install boson_multimodal package in development mode - use main environment
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "pip install -e temp_higgs/"
+      }
+    },
+
+    // Install PyTorch with appropriate CUDA support (AFTER all other packages to prevent version conflicts)
     {
       method: "script.start",
       params: {
@@ -150,27 +205,51 @@ module.exports = {
       }
     },
     
-    // Install dependencies
+    // Install HuggingFace Hub for authentication (using UV for speed)
     {
       method: "shell.run",
       params: {
         venv: "env",
         path: "app",
-        message: [
-          "pip install -r requirements.txt",
-          "pip install additional-package"
-        ]
+        message: "uv pip install huggingface-hub"
       }
     },
     
-    // Platform-specific installations
+    // Download Higgs Audio V2 models from Hugging Face (public models, no auth required)
     {
-      when: "{{platform === 'win32'}}",
       method: "shell.run",
       params: {
         venv: "env",
         path: "app",
-        message: "pip install windows-specific-package"
+        message: "hf download PierrunoYT/higgs-audio-v2-generation-3B-base --local-dir models/higgs-audio-v2-generation-3B-base --repo-type model"
+      }
+    },
+    
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "hf download PierrunoYT/higgs-audio-v2-tokenizer --local-dir models/higgs-audio-v2-tokenizer --repo-type model"
+      }
+    },
+    
+    // Final verification of all components
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "python -c \"from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine; print('All imports working correctly')\""
+      }
+    },
+    
+    // Create a setup completion marker
+    {
+      method: "fs.write",
+      params: {
+        path: "app/INSTALLATION_COMPLETE.txt",
+        text: "Higgs Audio V2 Enhanced installation completed successfully.\n\nNext steps:\n1. Start the application using the Start button\n2. Open the web interface at the provided URL\n3. Begin generating audio with text-to-speech and voice cloning features\n\nFor support, check the README.md file.\n\nNote: All models are public and no HuggingFace authentication required."
       }
     }
   ]
@@ -209,24 +288,50 @@ module.exports = async (kernel) => {
   return {
     daemon: true,  // Keep running in background
     run: [
+      // Start the Gradio interface
       {
         method: "shell.run",
         params: {
           venv: "env",
           path: "app",
-          message: `python app.py --port ${port}`,
+          env: {
+            GRADIO_SERVER_PORT: port.toString(),
+            GRADIO_SERVER_NAME: "0.0.0.0"
+          },
+          message: `python gradio_interface.py --port ${port} --host 0.0.0.0`,
           on: [{
-            // Wait for server to start
-            event: "/http:\/\/[0-9.:]+/",
+            // Wait for Gradio server to start - look for the running message
+            event: "/Running on local URL:.*http:\/\/[0-9.:]+:[0-9]+/",
+            done: true
+          }, {
+            // Alternative pattern for Gradio startup
+            event: "/Running on public URL:.*https:\/\/[a-zA-Z0-9.-]+\.gradio\.live/",
+            done: true
+          }, {
+            // Fallback pattern for server startup
+            event: "/Gradio app running/",
+            done: true
+          }, {
+            // Generic localhost pattern
+            event: `/http:\/\/localhost:${port}/`,
             done: true
           }]
         }
       },
+      
+      // Set the local URL for the "Open Web UI" button
       {
-        // Set URL for "Open Web UI" button
         method: "local.set",
         params: {
-          url: "{{input.event[0]}}"
+          url: `http://localhost:${port}`
+        }
+      },
+      
+      // Log success message
+      {
+        method: "log",
+        params: {
+          text: `🎤 Higgs Audio V2 Enhanced is running at http://localhost:${port}`
         }
       }
     ]
@@ -236,14 +341,29 @@ module.exports = async (kernel) => {
 
 ### Event Monitoring
 
-Monitor shell output for specific patterns:
+Monitor shell output for specific patterns. The Higgs Audio V2 implementation shows comprehensive Gradio monitoring:
 
 ```javascript
 on: [{
-  event: "/Server running on port [0-9]+/",  // Regex pattern
-  done: true  // Continue to next step when matched
+  // Wait for Gradio server to start - look for the running message
+  event: "/Running on local URL:.*http:\\/\\/[0-9.:]+:[0-9]+/",
+  done: true
+}, {
+  // Alternative pattern for Gradio startup
+  event: "/Running on public URL:.*https:\\/\\/[a-zA-Z0-9.-]+\\.gradio\\.live/",
+  done: true
+}, {
+  // Fallback pattern for server startup
+  event: "/Gradio app running/",
+  done: true
+}, {
+  // Generic localhost pattern
+  event: `/http:\\/\\/localhost:${port}/`,
+  done: true
 }]
 ```
+
+**Why Multiple Patterns?** Gradio can output different startup messages depending on configuration, network settings, and versions. Having multiple patterns ensures reliable detection across different environments.
 
 ## 4. PyTorch Installation (`torch.js`)
 
@@ -386,23 +506,81 @@ Handle project updates:
 ```javascript
 module.exports = {
   run: [
-    {
-      method: "shell.run",
-      params: {
-        message: "git pull"  // Update main repo
-      }
-    },
+    // Update the main project repository
     {
       method: "shell.run",
       params: {
         path: "app",
-        message: "git pull"  // Update app repo
+        message: "git pull origin main"
       }
     },
+    
+    // Update Higgs Audio package
     {
-      method: "fs.rm",
+      method: "shell.run",
       params: {
-        path: "app/env"  // Remove old environment
+        path: "app",
+        message: "git clone https://github.com/boson-ai/higgs-audio.git temp_higgs_update"
+      }
+    },
+    
+    // Install updated Higgs Audio package (using UV for speed)
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app/temp_higgs_update",
+        message: [
+          "uv pip install -r requirements.txt",
+          "uv pip install -e . --upgrade"
+        ]
+      }
+    },
+    
+    // Update interface dependencies (using UV for speed)
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "uv pip install -r requirements.txt --upgrade"
+      }
+    },
+    
+    // Clean up temporary update directory (Windows)
+    {
+      when: "{{platform === 'win32'}}",
+      method: "shell.run",
+      params: {
+        path: "app",
+        message: "rmdir /s /q temp_higgs_update"
+      }
+    },
+    
+    // Clean up temporary update directory (Unix-like)
+    {
+      when: "{{platform !== 'win32'}}",
+      method: "shell.run",
+      params: {
+        path: "app",
+        message: "rm -rf temp_higgs_update"
+      }
+    },
+    
+    // Update completion marker
+    {
+      method: "fs.write",
+      params: {
+        path: "app/UPDATE_COMPLETE.txt",
+        text: "Higgs Audio V2 Enhanced update completed successfully.\n\nUpdated components:\n- Higgs Audio package\n- Interface dependencies\n- Project files\n\nYou can now start the application using the Start button."
+      }
+    },
+    
+    // Log completion message
+    {
+      method: "log",
+      params: {
+        text: "✅ Higgs Audio V2 Enhanced has been updated successfully!"
       }
     }
   ]
@@ -415,12 +593,33 @@ Clean reset functionality:
 
 ```javascript
 module.exports = {
-  run: [{
-    method: "fs.rm",
-    params: {
-      path: "app"  // Remove entire app directory
+  run: [
+    // Remove the entire app directory (Windows)
+    {
+      when: "{{platform === 'win32'}}",
+      method: "shell.run",
+      params: {
+        message: "if exist app rmdir /s /q app"
+      }
+    },
+    
+    // Remove the entire app directory (Unix-like)
+    {
+      when: "{{platform !== 'win32'}}",
+      method: "shell.run",
+      params: {
+        message: "if [ -d app ]; then rm -rf app; fi"
+      }
+    },
+    
+    // Log completion message
+    {
+      method: "log",
+      params: {
+        text: "🗑️ Higgs Audio V2 Enhanced has been completely removed. You can reinstall it using the Install button."
+      }
     }
-  }]
+  ]
 }
 ```
 
@@ -714,6 +913,8 @@ module.exports = {
 3. **Final Installation Wins**: The last PyTorch installation determines the final version
 4. **CUDA Gets Lost**: CPU-only PyTorch overwriting CUDA PyTorch breaks GPU acceleration
 
+**Real Example from Higgs Audio V2**: The installation script follows this exact pattern - all requirements and packages are installed first, then PyTorch is installed last via `torch.js` to guarantee the correct CUDA-enabled version.
+
 ### Alternative: No-Deps Installation
 
 ```javascript
@@ -808,18 +1009,29 @@ But **PyTorch LAST** is the safest approach - it guarantees the correct final ve
 4. Verify cross-platform compatibility
 5. Test with different hardware configurations
 
-## Example Project Structure
+## Higgs Audio V2 Enhanced Project Structure
 
 ```
-my-ai-project/
-├── pinokio.js          # Main config
-├── install.js          # Installation
-├── start.js            # Startup
-├── update.js           # Updates
-├── reset.js            # Reset
-├── torch.js            # PyTorch setup
-├── icon.png            # Project icon
-└── README.md           # Documentation
+HiggsAudio-V2-Local Pinokio/
+├── pinokio.js                    # Main config with dynamic menu
+├── install.js                    # Installation with proper order
+├── start.js                      # Gradio startup with event monitoring
+├── update.js                     # Smart update with cleanup
+├── reset.js                      # Cross-platform reset
+├── torch.js                      # Advanced PyTorch installation
+├── icon.png                      # Higgs Audio icon
+├── PINOKIO_SCRIPT_GUIDE.md       # This comprehensive guide
+└── PINOKIO_PACKAGE_README.md     # Package documentation
 ```
 
-This structure provides a complete Pinokio package that users can install and manage through the Pinokio interface.
+### Key Implementation Highlights:
+
+1. **Dynamic Menus**: Context-aware interface with start/stop controls
+2. **Robust Installation**: UV package manager + correct PyTorch order
+3. **Event Monitoring**: Multiple Gradio startup patterns detected
+4. **Cross-platform**: Windows and Unix file operations
+5. **Model Management**: Public HuggingFace models with no auth required
+6. **Environment Safety**: Single virtual environment approach
+7. **User Experience**: Clear status messages and completion markers
+
+This structure provides a production-ready Pinokio package that users can install and manage through the Pinokio interface with confidence.
