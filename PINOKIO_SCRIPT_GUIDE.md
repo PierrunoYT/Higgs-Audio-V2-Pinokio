@@ -463,6 +463,83 @@ Set environment variables for shell commands:
 9. **Latest PyTorch**: Use PyTorch 2.7.0+ with CUDA 12.8 for best performance
 10. **Optional Optimizations**: Include xformers, triton, and sageattention for advanced users
 
+## ⚠️ CRITICAL: Virtual Environment Management
+
+**THE MOST IMPORTANT RULE**: Always use the **same `path` parameter** throughout your entire script!
+
+### The Problem: Multiple Environments
+
+```javascript
+// ❌ WRONG - Creates multiple environments!
+{
+  method: "shell.run",
+  params: {
+    venv: "env",
+    path: "app",           // Creates environment at: app/env/
+    message: "pip install -r requirements.txt"
+  }
+},
+{
+  method: "shell.run", 
+  params: {
+    venv: "env",
+    path: "app/subdir",    // Creates environment at: app/subdir/env/
+    message: "pip install more-packages"
+  }
+}
+```
+
+**Result**: Two separate environments! Packages installed in `app/env/` won't be available in `app/subdir/env/`
+
+### The Solution: Consistent Path
+
+```javascript  
+// ✅ CORRECT - Single environment!
+{
+  method: "shell.run",
+  params: {
+    venv: "env",
+    path: "app",           // Uses environment: app/env/
+    message: "pip install -r requirements.txt"
+  }
+},
+{
+  method: "shell.run",
+  params: {
+    venv: "env", 
+    path: "app",           // Uses SAME environment: app/env/
+    message: "pip install -r subdir/requirements.txt"  // Reference subdir files relatively
+  }
+}
+```
+
+### Key Rules:
+
+1. **Environment Formula**: `path` + `venv` = Environment Location
+   - `path: "app"` + `venv: "env"` = `app/env/`
+   - `path: "app/temp"` + `venv: "env"` = `app/temp/env/` (DIFFERENT!)
+
+2. **Always Use Same Path**: Pick one base path (usually `"app"`) and stick to it
+
+3. **Reference Files Relatively**: If you need files from subdirectories, reference them from your base path:
+   ```javascript
+   // Install from subdirectory requirements
+   message: "pip install -r subdirectory/requirements.txt"
+   
+   // Install package from subdirectory  
+   message: "pip install -e subdirectory/"
+   ```
+
+4. **One Environment Per Project**: Don't create multiple environments unless absolutely necessary
+
+### Common Mistakes:
+
+- ❌ Changing `path` between commands
+- ❌ Installing dependencies in different directories  
+- ❌ Using `pip install -e .` in subdirectories with different paths
+- ✅ Always use the same base `path` parameter
+- ✅ Reference subdirectory files relatively from base path
+
 ### UV Package Manager Benefits
 
 - **Speed**: 10-100x faster than traditional pip

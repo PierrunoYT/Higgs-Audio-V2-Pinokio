@@ -39,23 +39,23 @@ module.exports = {
       }
     },
 
-    // Install Higgs Audio dependencies (using UV for deps)
+    // Install Higgs Audio dependencies (using UV for deps) - use main environment
     {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app/temp_higgs",
-        message: "uv pip install -r requirements.txt"
+        path: "app",
+        message: "uv pip install -r temp_higgs/requirements.txt"
       }
     },
     
-    // Install boson_multimodal package in development mode
+    // Install boson_multimodal package in development mode - use main environment
     {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app/temp_higgs",
-        message: "pip install -e ."
+        path: "app",
+        message: "pip install -e temp_higgs/"
       }
     },
     
