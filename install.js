@@ -8,18 +8,6 @@ module.exports = {
       }
     },
     
-    // Install PyTorch with appropriate CUDA support
-    {
-      method: "script.start",
-      params: {
-        uri: "torch.js",
-        params: {
-          venv: "env",
-          path: "app"
-        }
-      }
-    },
-    
     // Clone and install Higgs Audio package
     {
       method: "shell.run",
@@ -56,6 +44,18 @@ module.exports = {
         venv: "env",
         path: "app",
         message: "pip install -e temp_higgs/"
+      }
+    },
+
+    // Install PyTorch with appropriate CUDA support (AFTER all other packages to prevent version conflicts)
+    {
+      method: "script.start",
+      params: {
+        uri: "torch.js",
+        params: {
+          venv: "env",
+          path: "app"
+        }
       }
     },
     
