@@ -463,6 +463,109 @@ Set environment variables for shell commands:
 9. **Latest PyTorch**: Use PyTorch 2.7.0+ with CUDA 12.8 for best performance
 10. **Optional Optimizations**: Include xformers, triton, and sageattention for advanced users
 
+## 🚀 Installation Order Best Practices
+
+**CRITICAL**: The order of installation steps matters! Follow this proven sequence:
+
+### Recommended Installation Order:
+
+```javascript
+module.exports = {
+  run: [
+    // 1. CLONE REPOSITORIES FIRST
+    {
+      method: "shell.run", 
+      params: {
+        message: "git clone https://github.com/your-repo/project.git app"
+      }
+    },
+    {
+      method: "shell.run",
+      params: {
+        path: "app",
+        message: "git clone https://github.com/dependency/repo.git temp_dependency"
+      }
+    },
+    
+    // 2. INSTALL ALL REQUIREMENTS (dependencies may conflict with PyTorch)
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "uv pip install -r requirements.txt"
+      }
+    },
+    {
+      method: "shell.run", 
+      params: {
+        venv: "env",
+        path: "app",
+        message: "uv pip install -r temp_dependency/requirements.txt"
+      }
+    },
+    
+    // 3. INSTALL PACKAGES IN DEVELOPMENT MODE 
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app", 
+        message: "pip install -e temp_dependency/"
+      }
+    },
+    
+    // 4. INSTALL PYTORCH LAST (guarantees correct version)
+    {
+      method: "script.start",
+      params: {
+        uri: "torch.js",
+        params: {
+          venv: "env",
+          path: "app"
+        }
+      }
+    },
+    
+    // 5. VERIFY INSTALLATIONS
+    {
+      method: "shell.run",
+      params: {
+        venv: "env", 
+        path: "app",
+        message: "python -c \"import torch; print(f'PyTorch {torch.__version__} CUDA: {torch.cuda.is_available()}')\""
+      }
+    },
+    
+    // 6. DOWNLOAD MODELS (after all code is ready)
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "hf download model-name --local-dir models/model-name"
+      }
+    }
+  ]
+}
+```
+
+### Why This Order Works:
+
+1. **Repositories First**: Get all source code before any installations
+2. **Requirements Before PyTorch**: Let conflicting dependencies install first
+3. **Development Packages**: Install local packages after their dependencies  
+4. **PyTorch Last**: Guarantees final CUDA-optimized version
+5. **Verification**: Confirm everything works correctly
+6. **Models Last**: Download models only after environment is stable
+
+### Common Order Mistakes:
+
+- ❌ Installing PyTorch first (gets overwritten by requirements)
+- ❌ Installing models before verifying code works
+- ❌ Mixed installation order causing environment conflicts
+- ❌ Installing packages in different paths (creates multiple environments)
+
 ## ⚠️ CRITICAL: Virtual Environment Management
 
 **THE MOST IMPORTANT RULE**: Always use the **same `path` parameter** throughout your entire script!
@@ -539,6 +642,148 @@ Set environment variables for shell commands:
 - ❌ Using `pip install -e .` in subdirectories with different paths
 - ✅ Always use the same base `path` parameter
 - ✅ Reference subdirectory files relatively from base path
+
+## ⚠️ CRITICAL: PyTorch Version Conflicts
+
+**ANOTHER CRITICAL ISSUE**: Package installations can overwrite your carefully installed PyTorch version!
+
+### The Problem: PyTorch Gets Overwritten
+
+```javascript
+// ❌ WRONG - PyTorch gets overwritten!
+{
+  method: "script.start",
+  params: {
+    uri: "torch.js",        // Installs PyTorch 2.7.0 + CUDA 12.8
+    params: { venv: "env", path: "app" }
+  }
+},
+{
+  method: "shell.run",
+  params: {
+    venv: "env", 
+    path: "app",
+    message: "pip install -r requirements.txt"  // May install torch==1.13.0!
+  }
+},
+{
+  method: "shell.run",
+  params: {
+    venv: "env",
+    path: "app", 
+    message: "pip install -e my_package/"       // May also have torch dependency!
+  }
+}
+```
+
+**Result**: Your CUDA-optimized PyTorch 2.7.0 gets replaced with CPU-only torch==1.13.0!
+
+### The Solution: PyTorch LAST
+
+```javascript
+// ✅ CORRECT - PyTorch installed last, guaranteed final version!
+{
+  method: "shell.run",
+  params: {
+    venv: "env",
+    path: "app",
+    message: "pip install -r requirements.txt"  // Install all dependencies first
+  }
+},
+{
+  method: "shell.run", 
+  params: {
+    venv: "env",
+    path: "app",
+    message: "pip install -e my_package/"       // Install packages second
+  }
+},
+{
+  method: "script.start",
+  params: {
+    uri: "torch.js",        // Install PyTorch LAST - guaranteed final version
+    params: { venv: "env", path: "app" }
+  }
+}
+```
+
+### Key Rules for PyTorch:
+
+1. **Install PyTorch LAST**: Always run `torch.js` after all other pip installations
+2. **Any pip install can overwrite PyTorch**: Including `pip install -r requirements.txt`, `pip install -e .`, etc.
+3. **Final Installation Wins**: The last PyTorch installation determines the final version
+4. **CUDA Gets Lost**: CPU-only PyTorch overwriting CUDA PyTorch breaks GPU acceleration
+
+### Alternative: No-Deps Installation
+
+```javascript
+// Alternative: Prevent dependencies from overwriting PyTorch
+{
+  method: "shell.run",
+  params: {
+    venv: "env",
+    path: "app",
+    message: "pip install -e my_package/ --no-deps"  // Install package without dependencies
+  }
+}
+```
+
+But **PyTorch LAST** is the safest approach - it guarantees the correct final version.
+
+## 🔐 HuggingFace Authentication Best Practices
+
+**Not all HuggingFace models require authentication!** Avoid confusing users with unnecessary auth steps.
+
+### When Authentication is Required:
+
+1. **Gated Models**: Models requiring approval (e.g., Llama, some Stable Diffusion models)
+2. **Private Models**: Models in private repositories  
+3. **Commercial Models**: Models with commercial licensing restrictions
+
+### When Authentication is NOT Required:
+
+1. **Public Models**: Most models on HuggingFace Hub are public
+2. **Open Source Models**: Models with permissive licenses (Apache, MIT, etc.)
+3. **Community Models**: User-uploaded models without restrictions
+
+### Check Before Adding Auth:
+
+```javascript
+// ❌ DON'T assume auth is needed
+{
+  method: "fs.write",
+  params: {
+    path: "app/INSTALL_COMPLETE.txt",
+    text: "Installation complete!\n\n1. Authenticate with HuggingFace using 'hf auth login'"
+  }
+}
+
+// ✅ DO check if models are actually gated
+// Visit the model page: https://huggingface.co/username/model-name
+// Look for "Gated model" or "Request access" indicators
+```
+
+### Best Practice Messages:
+
+```javascript
+// ✅ For PUBLIC models
+{
+  method: "fs.write", 
+  params: {
+    path: "app/INSTALL_COMPLETE.txt",
+    text: "Installation complete!\n\nNote: All models are public and no HuggingFace authentication required.\n\nStart the application to begin!"
+  }
+}
+
+// ✅ For GATED models  
+{
+  method: "fs.write",
+  params: {
+    path: "app/INSTALL_COMPLETE.txt", 
+    text: "Installation complete!\n\nIMPORTANT: This project uses gated models. Please:\n1. Request access at: https://huggingface.co/model-name\n2. Run: hf auth login\n3. Enter your HuggingFace token\n\nThen start the application."
+  }
+}
+```
 
 ### UV Package Manager Benefits
 
