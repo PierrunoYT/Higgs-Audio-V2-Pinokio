@@ -25,6 +25,7 @@ your-project/
 ├── start.js        # Application startup
 ├── update.js       # Update workflow
 ├── reset.js        # Reset/cleanup workflow
+├── link.js         # Deduplication workflow (optional)
 ├── torch.js        # PyTorch installation (optional)
 └── icon.png        # Project icon
 ```
@@ -37,17 +38,18 @@ The main configuration file defines your project metadata and dynamic menu syste
 const path = require('path')
 
 module.exports = {
-  version: "1.0.0",
-  title: "Higgs Audio V2 Enhanced",
-  description: "Advanced text-to-speech with voice cloning, multi-speaker support, and background music generation using Higgs Audio V2",
-  icon: "icon.png",
+  version: "3.7",
+  title: "<TITLE>",
+  description: "",
+  icon: "<ICON>",
   menu: async (kernel, info) => {
     let installed = info.exists("app/env")
     let running = {
       install: info.running("install.js"),
       start: info.running("start.js"),
       update: info.running("update.js"),
-      reset: info.running("reset.js")
+      reset: info.running("reset.js"),
+      link: info.running("link.js")
     }
     
     // Show different menus based on state
@@ -55,7 +57,7 @@ module.exports = {
       return [{
         default: true,
         icon: "fa-solid fa-plug",
-        text: "Installing Higgs Audio V2...",
+        text: "Installing",
         href: "install.js",
       }]
     } else if (installed) {
@@ -64,54 +66,75 @@ module.exports = {
         if (local && local.url) {
           return [{
             default: true,
-            icon: "fa-solid fa-microphone",
-            text: "Open Higgs Audio Interface",
+            icon: "fa-solid fa-rocket",
+            text: "Open Web UI",
             href: local.url,
           }, {
             icon: 'fa-solid fa-terminal',
-            text: "View Terminal",
+            text: "Terminal",
             href: "start.js",
-          }, {
-            icon: "fa-solid fa-stop",
-            text: "Stop Application",
-            href: "start.js",
-            params: { action: "stop" }
           }]
         } else {
           return [{
             default: true,
-            icon: "fa-solid fa-spinner fa-spin",
-            text: "Starting...",
+            icon: 'fa-solid fa-terminal',
+            text: "Terminal",
             href: "start.js",
           }]
         }
+      } else if (running.update) {
+        return [{
+          default: true,
+          icon: 'fa-solid fa-terminal',
+          text: "Updating",
+          href: "update.js",
+        }]
+      } else if (running.reset) {
+        return [{
+          default: true,
+          icon: 'fa-solid fa-terminal',
+          text: "Resetting",
+          href: "reset.js",
+        }]
+      } else if (running.link) {
+        return [{
+          default: true,
+          icon: 'fa-solid fa-terminal',
+          text: "Deduplicating",
+          href: "link.js",
+        }]
       } else {
         // Main menu when installed but not running
         return [{
           default: true,
-          icon: "fa-solid fa-play",
-          text: "Start Higgs Audio V2",
-          href: "start.js"
+          icon: "fa-solid fa-power-off",
+          text: "Start",
+          href: "start.js",
         }, {
-          icon: "fa-solid fa-sync",
+          icon: "fa-solid fa-plug",
           text: "Update",
           href: "update.js",
         }, {
-          icon: "fa-solid fa-download",
-          text: "Reinstall",
+          icon: "fa-solid fa-plug",
+          text: "Install",
           href: "install.js",
         }, {
-          icon: "fa-solid fa-trash",
-          text: "Reset",
+          icon: "fa-solid fa-file-zipper",
+          text: "<div><strong>Save Disk Space</strong><div>Deduplicates redundant library files</div></div>",
+          href: "link.js",
+        }, {
+          icon: "fa-regular fa-circle-xmark",
+          text: "<div><strong>Reset</strong><div>Revert to pre-install state</div></div>",
           href: "reset.js",
+          confirm: "Are you sure you wish to reset the app?"
         }]
       }
     } else {
       // Not installed - show install option
       return [{
         default: true,
-        icon: "fa-solid fa-download",
-        text: "Install Higgs Audio V2",
+        icon: "fa-solid fa-plug",
+        text: "Install",
         href: "install.js",
       }]
     }
@@ -535,6 +558,80 @@ module.exports = {
 }
 ```
 
+## 7. Deduplication Script (`link.js`) - Optional
+
+Save disk space by deduplicating redundant library files. This is particularly useful for projects with large dependencies:
+
+```javascript
+module.exports = {
+  run: [{
+    method: "fs.link",
+    params: {
+      path: "app"
+    }
+  }]
+}
+```
+
+### Key Features of the Deduplication Script:
+
+- **Disk Space Savings**: Removes duplicate files and creates symbolic links
+- **Preserves Functionality**: Applications continue to work normally
+- **Safe Operation**: Only affects redundant library files
+- **User-Friendly**: Clear menu description with HTML formatting
+
+### Menu Integration:
+
+The deduplication feature is integrated into the main menu with rich HTML formatting:
+
+```javascript
+{
+  icon: "fa-solid fa-file-zipper",
+  text: "<div><strong>Save Disk Space</strong><div>Deduplicates redundant library files</div></div>",
+  href: "link.js",
+}
+```
+
+This provides users with a clear understanding of what the operation does before they run it.
+
+## 8. Customizing the Template
+
+The current `pinokio.js` uses placeholder values that should be customized for your specific project:
+
+### Required Customizations:
+
+```javascript
+module.exports = {
+  version: "3.7",                    // Keep current or update
+  title: "<TITLE>",                  // Replace with your project name
+  description: "",                   // Add your project description
+  icon: "<ICON>",                    // Replace with your icon filename
+  // ... rest of configuration
+}
+```
+
+### Example Customization:
+
+```javascript
+module.exports = {
+  version: "1.0.0",
+  title: "My AI Project",
+  description: "Advanced AI application with web interface and GPU acceleration",
+  icon: "my-project-icon.png",
+  menu: async (kernel, info) => {
+    // ... same menu logic
+  }
+}
+```
+
+### Customization Checklist:
+
+1. **Title**: Replace `<TITLE>` with your project name
+2. **Description**: Add a meaningful project description
+3. **Icon**: Replace `<ICON>` with your icon filename (place in project root)
+4. **Menu Text**: Customize menu text to match your application
+5. **Version**: Set appropriate version number
+
 ## Template Variables
 
 Pinokio supports template variables in double braces:
@@ -921,29 +1018,39 @@ But **PyTorch LAST** is the safest approach - it guarantees the correct final ve
 4. Verify cross-platform compatibility
 5. Test with different hardware configurations
 
-## Higgs Audio V2 Enhanced Project Structure
+## Project Structure Template
 
 ```
-HiggsAudio-V2-Local Pinokio/
+your-pinokio-project/
 ├── pinokio.js                    # Main config with dynamic menu
 ├── install.js                    # Installation with proper order
-├── start.js                      # Gradio startup with event monitoring
-├── update.js                     # Smart update with cleanup
+├── start.js                      # Application startup with event monitoring
+├── update.js                     # Smart update workflow
 ├── reset.js                      # Cross-platform reset
-├── torch.js                      # Advanced PyTorch installation
-├── icon.png                      # Higgs Audio icon
+├── link.js                       # Deduplication workflow (optional)
+├── torch.js                      # Advanced PyTorch installation (optional)
+├── icon.png                      # Project icon
 ├── PINOKIO_SCRIPT_GUIDE.md       # This comprehensive guide
-└── PINOKIO_PACKAGE_README.md     # Package documentation
+└── README.md                     # Project documentation
 ```
 
 ### Key Implementation Highlights:
 
-1. **Dynamic Menus**: Context-aware interface with start/stop controls
-2. **Robust Installation**: UV package manager + correct PyTorch order
-3. **Event Monitoring**: Multiple Gradio startup patterns detected
-4. **Cross-platform**: Windows and Unix file operations
-5. **Model Management**: Public HuggingFace models with no auth required
-6. **Environment Safety**: Single virtual environment approach
-7. **User Experience**: Clear status messages and completion markers
+1. **Dynamic Menus**: Context-aware interface with comprehensive state management
+2. **Rich HTML Menus**: Professional formatting with strong text and descriptions
+3. **Deduplication Support**: Optional disk space optimization via `link.js`
+4. **Confirmation Dialogs**: User safety with reset confirmations
+5. **Terminal Access**: Direct terminal access during running operations
+6. **State Tracking**: Monitors install, start, update, reset, and link operations
+7. **Generic Template**: Uses placeholders for easy customization (`<TITLE>`, `<ICON>`)
+8. **User Experience**: Clear status indicators and intuitive navigation
 
-This structure provides a production-ready Pinokio package that users can install and manage through the Pinokio interface with confidence.
+### Advanced Menu Features Demonstrated:
+
+- **HTML Formatting**: Rich text with `<div><strong>` tags for better presentation
+- **Confirmation Prompts**: Safety measures for destructive operations
+- **Multiple Running States**: Handles concurrent operation monitoring
+- **Flexible Icons**: FontAwesome integration for visual appeal
+- **Terminal Integration**: Direct access to running processes
+
+This structure provides a production-ready Pinokio package template that can be easily customized for any project while maintaining professional UX standards.
