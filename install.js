@@ -114,7 +114,7 @@ module.exports = {
       method: "fs.write",
       params: {
         path: "app/INSTALLATION_COMPLETE.txt",
-        text: "Higgs Audio V2 Enhanced installation completed successfully.\n\nNext steps:\n1. Authenticate with HuggingFace using 'hf auth login' (required for model access)\n2. Start the application using the Start button\n3. Open the web interface at the provided URL\n\nFor support, check the README.md file.\n\nIf you get authentication errors, run: hf auth login"
+        text: "Higgs Audio V2 Enhanced installation completed successfully.\n\nNext steps:\n1. Start the application using the Start button\n2. Open the web interface at the provided URL\n3. Begin generating audio with text-to-speech and voice cloning features\n\nFor support, check the README.md file.\n\nNote: All models are public and no HuggingFace authentication required."
       }
     }
   ]
