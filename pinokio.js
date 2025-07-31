@@ -1,9 +1,9 @@
 const path = require('path')
 module.exports = {
-  version: "3.7",
-  title: "<TITLE>",
-  description: "",
-  icon: "<ICON>",
+  version: "1.0.0",
+  title: "Higgs Audio V2 Enhanced",
+  description: "Advanced text-to-speech with voice cloning, multi-speaker support, and background music generation using Higgs Audio V2",
+  icon: "icon.png",
   menu: async (kernel, info) => {
     let installed = info.exists("app/env")
     let running = {
