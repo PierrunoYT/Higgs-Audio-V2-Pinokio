@@ -13,7 +13,7 @@ module.exports = {
       method: "shell.run",
       params: {
         path: "app",
-        message: "git clone https://github.com/boson-ai/higgs-audio.git temp_higgs"
+        message: "git clone https://github.com/PierrunoYT/higgs-audio.git temp_higgs"
       }
     },
     
