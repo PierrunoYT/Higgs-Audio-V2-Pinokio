@@ -4,7 +4,7 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        message: "git clone https://github.com/PierrunoYT/HiggsAudio-V2-Local.git app"
+        message: "[ -d app ] && (cd app && git fetch && git pull) || git clone https://github.com/PierrunoYT/HiggsAudio-V2-Local.git app"
       }
     },
     
@@ -13,7 +13,7 @@ module.exports = {
       method: "shell.run",
       params: {
         path: "app",
-        message: "git clone https://github.com/PierrunoYT/higgs-audio.git temp_higgs"
+        message: "[ -d temp_higgs ] && (cd temp_higgs && git fetch && git pull) || git clone https://github.com/PierrunoYT/higgs-audio.git temp_higgs"
       }
     },
     
