@@ -14,7 +14,7 @@ module.exports = async (kernel) => {
             GRADIO_SERVER_PORT: port.toString(),
             GRADIO_SERVER_NAME: "0.0.0.0"
           },
-          message: `python gradio_interface.py --port ${port} --host 0.0.0.0`,
+          message: `python gradio_interface.py`,
           on: [{
             // Wait for Gradio server to start - look for the running message
             event: "/Running on local URL:.*http:\\/\\/[0-9.:]+:[0-9]+/",

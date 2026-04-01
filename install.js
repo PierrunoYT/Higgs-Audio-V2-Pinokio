@@ -4,20 +4,30 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        message: "[ -d app ] && (cd app && git fetch && git pull) || git clone https://github.com/PierrunoYT/HiggsAudio-V2-Local.git app"
+        message: "git clone https://github.com/PierrunoYT/HiggsAudio-V2-Local.git app"
       }
     },
     
-    // Clone and install Higgs Audio package
+    // Clone the official Higgs Audio package from Boson AI
     {
       method: "shell.run",
       params: {
         path: "app",
-        message: "[ -d temp_higgs ] && (cd temp_higgs && git fetch && git pull) || git clone https://github.com/PierrunoYT/higgs-audio.git temp_higgs"
+        message: "git clone https://github.com/boson-ai/higgs-audio.git temp_higgs"
       }
     },
     
-    // Install main app dependencies first (using UV for speed)
+    // Install Higgs Audio package requirements
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "uv pip install -r temp_higgs/requirements.txt"
+      }
+    },
+
+    // Install main app dependencies (using UV for speed)
     {
       method: "shell.run",
       params: {
@@ -27,7 +37,7 @@ module.exports = {
       }
     },
 
-    // Install boson_multimodal package in development mode - use main environment
+    // Install boson_multimodal package in development mode
     {
       method: "shell.run",
       params: {
@@ -49,7 +59,6 @@ module.exports = {
       }
     },
     
-    
     // Install HuggingFace Hub for authentication (using UV for speed)
     {
       method: "shell.run",
@@ -60,13 +69,13 @@ module.exports = {
       }
     },
     
-    // Download Higgs Audio V2 models from Hugging Face (public models, no auth required)
+    // Download Higgs Audio V2 models from Hugging Face
     {
       method: "shell.run",
       params: {
         venv: "env",
         path: "app",
-        message: "hf download PierrunoYT/higgs-audio-v2-generation-3B-base --local-dir models/higgs-audio-v2-generation-3B-base --repo-type model"
+        message: "huggingface-cli download bosonai/higgs-audio-v2-generation-3B-base --local-dir models/higgs-audio-v2-generation-3B-base --repo-type model"
       }
     },
     
@@ -75,7 +84,7 @@ module.exports = {
       params: {
         venv: "env",
         path: "app",
-        message: "hf download PierrunoYT/higgs-audio-v2-tokenizer --local-dir models/higgs-audio-v2-tokenizer --repo-type model"
+        message: "huggingface-cli download bosonai/higgs-audio-v2-tokenizer --local-dir models/higgs-audio-v2-tokenizer --repo-type model"
       }
     },
     

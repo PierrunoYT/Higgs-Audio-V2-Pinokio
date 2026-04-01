@@ -1,4 +1,3 @@
-const path = require('path')
 module.exports = {
   version: "1.0.0",
   title: "Higgs Audio V2 Enhanced",
@@ -70,7 +69,7 @@ module.exports = {
           text: "Start",
           href: "start.js",
         }, {
-          icon: "fa-solid fa-plug",
+          icon: "fa-solid fa-arrows-rotate",
           text: "Update",
           href: "update.js",
         }, {

@@ -76,7 +76,7 @@ transformers_cache/
 data/
 datasets/
 *.csv
-*.json
+*.jsonl
 *.xml
 
 # IDE
