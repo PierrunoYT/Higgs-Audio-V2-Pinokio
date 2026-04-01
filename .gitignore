@@ -31,9 +31,11 @@ venv.bak/
 .venv/
 .env/
 
-# Temporary installation directories
+# Cloned repos and downloaded models
 temp_higgs/
 higgs-audio/
+models/
+app/
 
 # PyTorch
 *.pth
@@ -51,7 +53,7 @@ Pipfile.lock
 # Environment configuration files
 .env
 
-# Audio files (common formats)
+# Audio files (but keep voice_examples tracked)
 *.wav
 *.mp3
 *.flac
@@ -59,6 +61,7 @@ Pipfile.lock
 *.ogg
 *.m4a
 *.wma
+!voice_examples/*.wav
 
 # Model files
 *.pkl

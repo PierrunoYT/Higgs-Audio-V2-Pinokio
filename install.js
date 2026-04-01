@@ -1,18 +1,9 @@
 module.exports = {
   run: [
-    // Clone the Higgs Audio V2 Enhanced repository
-    {
-      method: "shell.run",
-      params: {
-        message: "git clone https://github.com/PierrunoYT/HiggsAudio-V2-Local.git app"
-      }
-    },
-    
     // Clone the official Higgs Audio package from Boson AI
     {
       method: "shell.run",
       params: {
-        path: "app",
         message: "git clone https://github.com/boson-ai/higgs-audio.git temp_higgs"
       }
     },
@@ -22,17 +13,15 @@ module.exports = {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app",
         message: "uv pip install -r temp_higgs/requirements.txt"
       }
     },
 
-    // Install main app dependencies (using UV for speed)
+    // Install main app dependencies
     {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app",
         message: "uv pip install -r requirements.txt"
       }
     },
@@ -42,29 +31,26 @@ module.exports = {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app",
         message: "pip install -e temp_higgs/"
       }
     },
 
-    // Install PyTorch with appropriate CUDA support (AFTER all other packages to prevent version conflicts)
+    // Install PyTorch with appropriate CUDA support
     {
       method: "script.start",
       params: {
         uri: "torch.js",
         params: {
-          venv: "env",
-          path: "app"
+          venv: "env"
         }
       }
     },
     
-    // Install HuggingFace Hub for authentication (using UV for speed)
+    // Install HuggingFace Hub CLI
     {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app",
         message: "uv pip install huggingface-hub"
       }
     },
@@ -74,7 +60,6 @@ module.exports = {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app",
         message: "huggingface-cli download bosonai/higgs-audio-v2-generation-3B-base --local-dir models/higgs-audio-v2-generation-3B-base --repo-type model"
       }
     },
@@ -83,27 +68,16 @@ module.exports = {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app",
         message: "huggingface-cli download bosonai/higgs-audio-v2-tokenizer --local-dir models/higgs-audio-v2-tokenizer --repo-type model"
       }
     },
     
-    // Final verification of all components
+    // Verify installation
     {
       method: "shell.run",
       params: {
         venv: "env",
-        path: "app",
         message: "python -c \"from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine; print('All imports working correctly')\""
-      }
-    },
-    
-    // Create a setup completion marker
-    {
-      method: "fs.write",
-      params: {
-        path: "app/INSTALLATION_COMPLETE.txt",
-        text: "Higgs Audio V2 Enhanced installation completed successfully.\n\nNext steps:\n1. Start the application using the Start button\n2. Open the web interface at the provided URL\n3. Begin generating audio with text-to-speech and voice cloning features\n\nFor support, check the README.md file.\n\nNote: All models are public and no HuggingFace authentication required."
       }
     }
   ]
