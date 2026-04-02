@@ -43,7 +43,7 @@ module.exports = {
       }
     },
 
-    // Install PyTorch with appropriate CUDA support
+    // Install PyTorch with appropriate CUDA support LAST to overwrite any CPU-only torch
     {
       method: "script.start",
       params: {
