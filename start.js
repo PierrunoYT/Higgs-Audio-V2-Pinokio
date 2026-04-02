@@ -12,7 +12,7 @@ module.exports = async (kernel) => {
             GRADIO_SERVER_PORT: port.toString()
           },
           message: [
-            "python gradio_interface.py"
+            "python app.py"
           ],
           on: [{
             event: "/(http:\\/\\/\\S+)/",
