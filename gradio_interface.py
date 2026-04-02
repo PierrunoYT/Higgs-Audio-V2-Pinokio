@@ -1014,7 +1014,7 @@ if __name__ == "__main__":
     # Parse command line arguments for enhanced functionality
     parser = argparse.ArgumentParser(description="Enhanced HiggsAudio V2 Gradio Interface")
     parser.add_argument("--host", default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"), help="Host to bind to (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=7860, help="Port to bind to (default: 7860)")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("GRADIO_SERVER_PORT", "7860")), help="Port to bind to (default: 7860)")
     parser.add_argument("--share", action="store_true", help="Enable public sharing via Gradio")
 
     args = parser.parse_args()
