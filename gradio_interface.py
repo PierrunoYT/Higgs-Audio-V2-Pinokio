@@ -1,7 +1,8 @@
 """
 Enhanced Gradio interface for HiggsAudio model serving.
-Provides a comprehensive web UI with voice cloning, multi-speaker support, and advanced features.
-Merged from gradio_interface1.py while preserving 8-bit quantization functionality.
+Provides a comprehensive web UI for the main public HiggsAudio workflows:
+smart voice generation, zero-shot voice cloning, multi-speaker dialogue,
+and optional lower-VRAM loading.
 """
 
 import argparse
@@ -15,7 +16,6 @@ import gradio as gr
 import numpy as np
 import time
 from functools import lru_cache
-import re
 import torch
 import soundfile as sf
 import tempfile
@@ -41,7 +41,9 @@ DEFAULT_AUDIO_TOKENIZER_PATH = "models/higgs-audio-v2-tokenizer"
 SAMPLE_RATE = 24000
 
 DEFAULT_SYSTEM_PROMPT = (
-    "Generate audio following instruction.\n\n"
+    "Generate audio following instruction.\n"
+    "Speak only the provided content. Do not add extra words, sound effects, speaker names, or narration unless they are explicitly included.\n"
+    "Stay faithful to the text and keep the delivery clear and natural.\n\n"
     "<|scene_desc_start|>\n"
     "Audio is recorded from a quiet room.\n"
     "<|scene_desc_end|>"
@@ -54,12 +56,12 @@ PREDEFINED_EXAMPLES = {
     "voice-clone": {
         "system_prompt": "",
         "input_text": "Hey there! I'm your friendly voice twin in the making. Pick a voice preset below or upload your own audio - let's clone some vocals and bring your voice to life! ",
-        "description": "Voice clone to clone the reference audio. Leave the system prompt empty.",
+        "description": "Zero-shot voice cloning. HiggsAudio copies the speaker style from a short reference clip, then speaks the new text in that voice.",
     },
     "smart-voice": {
         "system_prompt": DEFAULT_SYSTEM_PROMPT,
         "input_text": "The sun rises in the east and sets in the west. This simple fact has been observed by humans for thousands of years.",
-        "description": "Smart voice to generate speech based on the context",
+        "description": "Single-speaker smart voice. The model uses the system and scene prompt to choose delivery, pacing, and tone without a reference clip.",
     },
     "multispeaker-voice-description": {
         "system_prompt": "You are an AI assistant designed to convert text into speech.\n"
@@ -73,7 +75,7 @@ PREDEFINED_EXAMPLES = {
         "[SPEAKER1] Oh, come on! It wasn't a big deal, and I knew you would overreact like this.\n"
         "[SPEAKER0] Overreact? You made a decision that affects both of us without even considering my opinion!\n"
         "[SPEAKER1] Because I didn't have time to sit around waiting for you to make up your mind! Someone had to act.",
-        "description": "Multispeaker with different voice descriptions in the system prompt",
+        "description": "Multi-speaker dialogue generation. Speaker tags in the text plus scene instructions help HiggsAudio keep voices separated across the conversation.",
     },
     "single-speaker-voice-description": {
         "system_prompt": "Generate audio following instruction.\n\n"
@@ -85,7 +87,7 @@ PREDEFINED_EXAMPLES = {
         "And let's be honest, if you've been even remotely connected to tech, AI, or machine learning lately, you know that deep learning is everywhere.\n"
         "\n"
         "So here's the big question: Do you want to understand how deep learning works?\n",
-        "description": "Single speaker with voice description in the system prompt",
+        "description": "Conditioned single-speaker generation. Use the scene prompt to describe accent, energy, recording conditions, or delivery style.",
     },
     "single-speaker-zh": {
         "system_prompt": "Generate audio following instruction.\n\n"
@@ -96,25 +98,25 @@ PREDEFINED_EXAMPLES = {
         "今天我们要聊的是一个你绝对不能忽视的话题: 多模态学习.\n"
         "那么, 问题来了, 你真的了解多模态吗? 你知道如何自己动手构建多模态大模型吗.\n"
         "或者说, 你能察觉到我其实是个机器人吗?",
-        "description": "Single speaker speaking Chinese",
+        "description": "Single-speaker multilingual generation example using Chinese input.",
     },
     "single-speaker-bgm": {
         "system_prompt": DEFAULT_SYSTEM_PROMPT,
         "input_text": "[music start] I will remember this, thought Ender, when I am defeated. To keep dignity, and give honor where it's due, so that defeat is not disgrace. And I hope I don't have to do it often. [music end]",
-        "description": "Single speaker with BGM using music tag. This is an experimental feature and you may need to try multiple times to get the best result.",
+        "description": "Experimental speech plus music control using inline audio tags. Results can vary and may need a few retries.",
     },
 }
 
 # Parameter presets for different use cases
 PARAMETER_PRESETS = {
     "default": {
-        "temperature": 0.3,
-        "top_p": 0.95,
-        "top_k": 50,
-        "max_completion_tokens": 1024,
-        "ras_win_len": 7,
+        "temperature": 0.15,
+        "top_p": 0.9,
+        "top_k": 30,
+        "max_completion_tokens": 896,
+        "ras_win_len": 8,
         "ras_win_max_num_repeat": 2,
-        "description": "Balanced quality and speed settings",
+        "description": "Safer default tuned to reduce hallucinations and repetition",
     },
     "female_voice": {
         "temperature": 0.3,
@@ -136,12 +138,21 @@ PARAMETER_PRESETS = {
     },
     "high_quality": {
         "temperature": 0.1,
-        "top_p": 0.9,
-        "top_k": 30,
-        "max_completion_tokens": 1024,
-        "ras_win_len": 7,
+        "top_p": 0.88,
+        "top_k": 20,
+        "max_completion_tokens": 896,
+        "ras_win_len": 8,
         "ras_win_max_num_repeat": 2,
         "description": "Conservative settings for highest quality output",
+    },
+    "faithful_tts": {
+        "temperature": 0.0,
+        "top_p": 0.85,
+        "top_k": 10,
+        "max_completion_tokens": 768,
+        "ras_win_len": 8,
+        "ras_win_max_num_repeat": 2,
+        "description": "Most conservative settings for transcript-faithful speech with minimal improvisation",
     },
     "creative": {
         "temperature": 0.7,
@@ -162,6 +173,9 @@ PARAMETER_PRESETS = {
         "description": "Faster generation with shorter output",
     },
 }
+
+# Defaults for UI sliders and text_to_speech — must match the "default" preset
+DEFAULT_GEN_PARAMS = PARAMETER_PRESETS["default"]
 
 # Voice presets will be loaded from config
 VOICE_PRESETS = {}
@@ -386,7 +400,7 @@ def initialize_engine(
         audio_tokenizer_path: Path to the audio tokenizer
         tokenizer_path: Path to the tokenizer (optional)
         device: Device to use for inference (auto-detected if None)
-        load_in_8bit: Whether to load model in 8-bit quantized mode
+        load_in_8bit: If True, load weights in FP16 and use a smaller KV cache (lower VRAM)
 
     Returns:
         Status message and model status display
@@ -416,19 +430,25 @@ def initialize_engine(
         if device is None:
             device = get_current_device()
 
-        logger.info(f"Initializing HiggsAudio engine with 8-bit: {load_in_8bit}")
+        logger.info(
+            f"Initializing HiggsAudio engine (FP16 weights: {load_in_8bit}, "
+            "KV cache tuned for lower VRAM)"
+        )
 
-        # Set optimized KV cache lengths for lower VRAM usage
+        # HiggsAudioServeEngine does not expose bitsandbytes 8-bit; use FP16 weights
+        # when the user requests the low-VRAM path. Smaller KV caches still help VRAM.
+        torch_dtype = torch.float16 if load_in_8bit else "auto"
         if load_in_8bit:
-            kv_cache_lengths = [512, 1024, 2048]  # Smaller cache sizes for 8-bit
+            kv_cache_lengths = [512, 1024, 2048]
         else:
-            kv_cache_lengths = [1024, 2048, 4096]  # Standard cache sizes
+            kv_cache_lengths = [1024, 2048, 4096]
 
         engine = HiggsAudioServeEngine(
             model_name_or_path=model_path,
             audio_tokenizer_name_or_path=audio_tokenizer_path,
             tokenizer_name_or_path=tokenizer_path,
             device=device,
+            torch_dtype=torch_dtype,
             kv_cache_lengths=kv_cache_lengths,
         )
 
@@ -437,7 +457,7 @@ def initialize_engine(
         # Get memory info after initialization
         memory_info = get_gpu_memory_info()
         quantization_info = (
-            " (8-bit quantized)" if load_in_8bit else " (full precision)"
+            " (FP16 weights, smaller KV cache)" if load_in_8bit else " (default precision)"
         )
         status_msg = f"✅ Model successfully loaded on {device}{quantization_info}! Ready to generate speech.\n\n{memory_info}"
         status_display = (
@@ -459,9 +479,8 @@ def initialize_engine(
 
 
 def process_text_output(text_output: str):
-    """Remove all the continuous <|AUDIO_OUT|> tokens with a single <|AUDIO_OUT|>."""
-    text_output = re.sub(r"(<\|AUDIO_OUT\|>)+", r"<|AUDIO_OUT|>", text_output)
-    return text_output
+    """Return a clean status message. Raw model text output is noise for TTS and not useful to display."""
+    return "Audio generated successfully."
 
 
 def prepare_chatml_sample(
@@ -517,17 +536,31 @@ def text_to_speech(
     voice_preset,
     reference_audio=None,
     reference_text=None,
-    max_completion_tokens=1024,
-    temperature=1.0,
-    top_p=0.95,
-    top_k=50,
+    max_completion_tokens=None,
+    temperature=None,
+    top_p=None,
+    top_k=None,
     system_prompt=DEFAULT_SYSTEM_PROMPT,
     stop_strings=None,
-    ras_win_len=7,
-    ras_win_max_num_repeat=2,
+    ras_win_len=None,
+    ras_win_max_num_repeat=None,
 ):
     """Convert text to speech using HiggsAudioServeEngine."""
     global engine
+
+    d = DEFAULT_GEN_PARAMS
+    if max_completion_tokens is None:
+        max_completion_tokens = d["max_completion_tokens"]
+    if temperature is None:
+        temperature = d["temperature"]
+    if top_p is None:
+        top_p = d["top_p"]
+    if top_k is None:
+        top_k = d["top_k"]
+    if ras_win_len is None:
+        ras_win_len = d["ras_win_len"]
+    if ras_win_max_num_repeat is None:
+        ras_win_max_num_repeat = d["ras_win_max_num_repeat"]
 
     if engine is None:
         init_result = initialize_engine(
@@ -636,8 +669,21 @@ def create_gradio_interface():
     ) as interface:
         gr.Markdown("# HiggsAudio V2 Enhanced Text-to-Speech Interface")
         gr.Markdown(
-            "Generate expressive speech with voice cloning, multi-speaker support, background music, and 8-bit quantization support."
+            "Generate expressive `24kHz` audio with chat-style prompting, optional reference-audio voice cloning, multi-speaker dialogue tags, and lower-VRAM FP16 loading."
         )
+        with gr.Accordion("How HiggsAudio Works", open=False):
+            gr.Markdown(
+                """
+                HiggsAudio V2 is an audio generation model built around an LLM-style generation stack.
+
+                - It reads a chat-like prompt made of `system`, `scene`, and `user` messages.
+                - For zero-shot voice cloning, you can provide a short reference clip plus its transcript.
+                - For dialogue, speaker tags like `[SPEAKER0]` and `[SPEAKER1]` help the model keep roles separate.
+                - Boson AI says the model was pretrained on more than `10M` hours of automatically annotated audio data.
+                - The published architecture highlights a unified audio tokenizer plus a `DualFFN` design so the model can handle both text and acoustic tokens efficiently.
+                - Generated tokens are decoded into waveform audio at `24kHz`.
+                """
+            )
 
         # Model status indicator
         model_status_display = gr.Markdown(
@@ -693,30 +739,41 @@ def create_gradio_interface():
                     )
 
                 with gr.Accordion("Advanced Parameters", open=False):
+                    gr.Markdown(
+                        "Lower `temperature`, `top_p`, and `top_k` usually reduce audio hallucinations. Start with `Default` or `Faithful TTS` if you want the model to stick closely to the script."
+                    )
                     max_completion_tokens = gr.Slider(
                         minimum=128,
                         maximum=4096,
-                        value=1024,
+                        value=DEFAULT_GEN_PARAMS["max_completion_tokens"],
                         step=10,
                         label="Max Completion Tokens",
                     )
                     temperature = gr.Slider(
                         minimum=0.0,
                         maximum=1.5,
-                        value=1.0,
+                        value=DEFAULT_GEN_PARAMS["temperature"],
                         step=0.1,
                         label="Temperature",
                     )
                     top_p = gr.Slider(
-                        minimum=0.1, maximum=1.0, value=0.95, step=0.05, label="Top P"
+                        minimum=0.1,
+                        maximum=1.0,
+                        value=DEFAULT_GEN_PARAMS["top_p"],
+                        step=0.05,
+                        label="Top P",
                     )
                     top_k = gr.Slider(
-                        minimum=-1, maximum=100, value=50, step=1, label="Top K"
+                        minimum=-1,
+                        maximum=100,
+                        value=DEFAULT_GEN_PARAMS["top_k"],
+                        step=1,
+                        label="Top K",
                     )
                     ras_win_len = gr.Slider(
                         minimum=0,
                         maximum=10,
-                        value=7,
+                        value=DEFAULT_GEN_PARAMS["ras_win_len"],
                         step=1,
                         label="RAS Window Length",
                         info="Window length for repetition avoidance sampling",
@@ -724,7 +781,7 @@ def create_gradio_interface():
                     ras_win_max_num_repeat = gr.Slider(
                         minimum=1,
                         maximum=10,
-                        value=2,
+                        value=DEFAULT_GEN_PARAMS["ras_win_max_num_repeat"],
                         step=1,
                         label="RAS Max Num Repeat",
                         info="Maximum number of repetitions allowed in the window",
@@ -757,6 +814,10 @@ def create_gradio_interface():
                                     "high_quality",
                                 ),
                                 (
+                                    "Faithful TTS - Lowest hallucination risk",
+                                    "faithful_tts",
+                                ),
+                                (
                                     "Creative - More expressive and varied output",
                                     "creative",
                                 ),
@@ -777,7 +838,7 @@ def create_gradio_interface():
                 generate_btn = gr.Button("Generate Speech", variant="primary")
 
             with gr.Column(scale=2):
-                output_text = gr.TextArea(label="Model Response", lines=3)
+                output_text = gr.TextArea(label="Generation Status", lines=3)
                 output_audio = gr.Audio(
                     label="Generated Audio", interactive=False, autoplay=True
                 )
@@ -801,12 +862,12 @@ def create_gradio_interface():
             )
             sample_audio = gr.Audio(label="Voice Sample")
 
-        # Model initialization section with enhanced 8-bit quantization support
+        # Model initialization (optional FP16 weights + smaller KV cache for lower VRAM)
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### 🚀 Model Setup & Configuration")
                 gr.Markdown(
-                    "*Configure and initialize the HiggsAudio model (first-time setup may take 5-10 minutes)*"
+                    "*Load the local HiggsAudio model and tokenizer, then generate from prompts, tags, and optional reference audio. First-time setup may take 5-10 minutes.*"
                 )
 
                 # Model configuration section
@@ -841,16 +902,17 @@ def create_gradio_interface():
                 with gr.Accordion("⚙️ Model Loading Options", open=True):
                     gr.Markdown("**🚀 Model Loading Configuration:**")
                     gr.Markdown(
-                        "• **8-bit Quantization**: ~50% less VRAM usage, minimal quality impact"
+                        "• **FP16 weights + smaller KV cache**: lower VRAM than full precision; "
+                        "recommended if you are tight on memory"
                     )
                     gr.Markdown(
                         "• **Memory Info**: Check current VRAM usage before loading"
                     )
 
                     load_in_8bit_checkbox = gr.Checkbox(
-                        label="Enable 8-bit Quantization",
+                        label="Load in FP16 (lower VRAM)",
                         value=False,
-                        info="Reduces VRAM usage by ~50%, recommended for GPUs with 16GB or less",
+                        info="Uses half-precision weights and a smaller KV cache. Not the same as bitsandbytes 8-bit.",
                     )
 
                     with gr.Row():
@@ -863,11 +925,10 @@ def create_gradio_interface():
 
                     gr.Markdown(
                         """
-                        **8-bit Quantization Benefits:**
-                        - Reduces GPU memory usage by approximately 50%
-                        - Enables running larger models on smaller GPUs (16GB VRAM or less)
-                        - Minimal impact on audio quality
-                        - Automatically optimizes KV cache sizes for lower memory usage
+                        **FP16 / low-VRAM mode:**
+                        - Loads weights in float16 instead of the default dtype
+                        - Uses smaller KV-cache sizes to save additional VRAM
+                        - Useful on 16GB GPUs or when the default load runs out of memory
                         """
                     )
 
@@ -961,7 +1022,7 @@ def create_gradio_interface():
             outputs=[output_text, output_audio, model_status_display],
         )
 
-        # Model reload button with 8-bit checkbox
+        # Model reload button with FP16 / low-VRAM checkbox
         reload_model_btn.click(
             fn=initialize_engine,
             inputs=[
