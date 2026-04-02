@@ -17,12 +17,15 @@ import time
 from functools import lru_cache
 import re
 import torch
-import torchaudio
+import soundfile as sf
 import tempfile
 import gc
 
 # Import HiggsAudio components
-from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine, HiggsAudioResponse
+from boson_multimodal.serve.serve_engine import (
+    HiggsAudioServeEngine,
+    HiggsAudioResponse,
+)
 from boson_multimodal.data_types import ChatMLSample, AudioContent, Message
 
 # Set up logging
@@ -111,7 +114,7 @@ PARAMETER_PRESETS = {
         "max_completion_tokens": 1024,
         "ras_win_len": 7,
         "ras_win_max_num_repeat": 2,
-        "description": "Balanced quality and speed settings"
+        "description": "Balanced quality and speed settings",
     },
     "female_voice": {
         "temperature": 0.3,
@@ -120,7 +123,7 @@ PARAMETER_PRESETS = {
         "max_completion_tokens": 1024,
         "ras_win_len": 7,
         "ras_win_max_num_repeat": 2,
-        "description": "Optimized settings for female voice generation"
+        "description": "Optimized settings for female voice generation",
     },
     "male_voice": {
         "temperature": 0.3,
@@ -129,7 +132,7 @@ PARAMETER_PRESETS = {
         "max_completion_tokens": 1024,
         "ras_win_len": 7,
         "ras_win_max_num_repeat": 2,
-        "description": "Optimized settings for male voice generation"
+        "description": "Optimized settings for male voice generation",
     },
     "high_quality": {
         "temperature": 0.1,
@@ -138,7 +141,7 @@ PARAMETER_PRESETS = {
         "max_completion_tokens": 1024,
         "ras_win_len": 7,
         "ras_win_max_num_repeat": 2,
-        "description": "Conservative settings for highest quality output"
+        "description": "Conservative settings for highest quality output",
     },
     "creative": {
         "temperature": 0.7,
@@ -147,7 +150,7 @@ PARAMETER_PRESETS = {
         "max_completion_tokens": 1024,
         "ras_win_len": 7,
         "ras_win_max_num_repeat": 2,
-        "description": "Higher temperature for more expressive and varied output"
+        "description": "Higher temperature for more expressive and varied output",
     },
     "fast": {
         "temperature": 0.3,
@@ -156,12 +159,13 @@ PARAMETER_PRESETS = {
         "max_completion_tokens": 512,
         "ras_win_len": 7,
         "ras_win_max_num_repeat": 2,
-        "description": "Faster generation with shorter output"
-    }
+        "description": "Faster generation with shorter output",
+    },
 }
 
 # Voice presets will be loaded from config
 VOICE_PRESETS = {}
+
 
 @lru_cache(maxsize=20)
 def encode_audio_file(file_path):
@@ -169,36 +173,41 @@ def encode_audio_file(file_path):
     with open(file_path, "rb") as audio_file:
         return base64.b64encode(audio_file.read()).decode("utf-8")
 
+
 def get_current_device():
     """Get the current device."""
     return "cuda" if torch.cuda.is_available() else "cpu"
+
 
 def get_gpu_memory_info():
     """Get GPU memory usage information."""
     if not torch.cuda.is_available():
         return "❌ CUDA not available"
-    
+
     try:
         device = torch.cuda.current_device()
         total_memory = torch.cuda.get_device_properties(device).total_memory
         allocated_memory = torch.cuda.memory_allocated(device)
         cached_memory = torch.cuda.memory_reserved(device)
         free_memory = total_memory - allocated_memory
-        
+
         total_gb = total_memory / 1024**3
         allocated_gb = allocated_memory / 1024**3
         cached_gb = cached_memory / 1024**3
         free_gb = free_memory / 1024**3
-        
+
         usage_percent = (allocated_memory / total_memory) * 100
-        
-        return (f"🔍 **GPU Memory Status:**\n"
-                f"- **Total VRAM:** {total_gb:.1f} GB\n"
-                f"- **Allocated:** {allocated_gb:.1f} GB ({usage_percent:.1f}%)\n"
-                f"- **Cached:** {cached_gb:.1f} GB\n"
-                f"- **Free:** {free_gb:.1f} GB")
+
+        return (
+            f"🔍 **GPU Memory Status:**\n"
+            f"- **Total VRAM:** {total_gb:.1f} GB\n"
+            f"- **Allocated:** {allocated_gb:.1f} GB ({usage_percent:.1f}%)\n"
+            f"- **Cached:** {cached_gb:.1f} GB\n"
+            f"- **Free:** {free_gb:.1f} GB"
+        )
     except Exception as e:
         return f"❌ Error getting GPU info: {str(e)}"
+
 
 def load_voice_presets():
     """Load the voice presets from the voice_examples directory."""
@@ -210,11 +219,14 @@ def load_voice_presets():
         logger.info(f"Loaded voice presets: {list(voice_presets.keys())}")
         return voice_presets
     except FileNotFoundError:
-        logger.warning("Voice examples config file not found. Using empty voice presets.")
+        logger.warning(
+            "Voice examples config file not found. Using empty voice presets."
+        )
         return {"EMPTY": "No reference voice"}
     except Exception as e:
         logger.error(f"Error loading voice presets: {e}")
         return {"EMPTY": "No reference voice"}
+
 
 def get_voice_preset(voice_preset):
     """Get the voice path and text for a given voice preset."""
@@ -222,23 +234,48 @@ def get_voice_preset(voice_preset):
     if not os.path.exists(voice_path):
         logger.warning(f"Voice preset file not found: {voice_path}")
         return None, "Voice preset not found"
-    
+
     text = VOICE_PRESETS.get(voice_preset, "No transcript available")
     return voice_path, text
+
 
 def normalize_chinese_punctuation(text):
     """Convert Chinese (full-width) punctuation marks to English (half-width) equivalents."""
     chinese_to_english_punct = {
-        "，": ", ", "。": ".", "：": ":", "；": ";", "？": "?", "！": "!",
-        "（": "(", "）": ")", "【": "[", "】": "]", "《": "<", "》": ">",
-        "“": '"', "”": '"', "‘": "'", "’": "'",
-        "「": '"', "」": '"', "『": '"', "』": '"', "、": ",", "—": "-",
-        "…": "...", "·": ".", "「": '"', "」": '"', "『": '"', "』": '"',
+        "，": ", ",
+        "。": ".",
+        "：": ":",
+        "；": ";",
+        "？": "?",
+        "！": "!",
+        "（": "(",
+        "）": ")",
+        "【": "[",
+        "】": "]",
+        "《": "<",
+        "》": ">",
+        "“": '"',
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+        "「": '"',
+        "」": '"',
+        "『": '"',
+        "』": '"',
+        "、": ",",
+        "—": "-",
+        "…": "...",
+        "·": ".",
+        "「": '"',
+        "」": '"',
+        "『": '"',
+        "』": '"',
     }
-    
+
     for zh_punct, en_punct in chinese_to_english_punct.items():
         text = text.replace(zh_punct, en_punct)
     return text
+
 
 def _extract_stop_strings(stop_strings: Optional[Any]) -> List[str]:
     """Normalize stop strings into a list of non-empty strings."""
@@ -250,7 +287,11 @@ def _extract_stop_strings(stop_strings: Optional[Any]) -> List[str]:
     elif isinstance(stop_strings, (list, tuple)):
         rows = stop_strings
     else:
-        return [str(stop_strings).strip()] if str(stop_strings).strip() else DEFAULT_STOP_STRINGS.copy()
+        return (
+            [str(stop_strings).strip()]
+            if str(stop_strings).strip()
+            else DEFAULT_STOP_STRINGS.copy()
+        )
 
     values: List[str] = []
     if isinstance(rows, dict):
@@ -270,6 +311,7 @@ def _extract_stop_strings(stop_strings: Optional[Any]) -> List[str]:
                 values.append(cleaned)
 
     return values if values else DEFAULT_STOP_STRINGS.copy()
+
 
 def normalize_text(transcript: str):
     transcript = normalize_chinese_punctuation(transcript)
@@ -296,10 +338,16 @@ def normalize_text(transcript: str):
     transcript = "\n".join([" ".join(line.split()) for line in lines if line.strip()])
     transcript = transcript.strip()
 
-    if not any([transcript.endswith(c) for c in [".", "!", "?", ",", ";", '"', "'", "</SE_e>", "</SE>"]]):
+    if not any(
+        [
+            transcript.endswith(c)
+            for c in [".", "!", "?", ",", ";", '"', "'", "</SE_e>", "</SE>"]
+        ]
+    ):
         transcript += "."
 
     return transcript
+
 
 def load_parameter_preset(preset_name):
     """Load parameter preset settings."""
@@ -312,47 +360,51 @@ def load_parameter_preset(preset_name):
             gr.update(value=preset["max_completion_tokens"]),
             gr.update(value=preset["ras_win_len"]),
             gr.update(value=preset["ras_win_max_num_repeat"]),
-            f"✅ '{preset_name.replace('_', ' ').title()}' preset loaded: {preset['description']}"
+            f"✅ '{preset_name.replace('_', ' ').title()}' preset loaded: {preset['description']}",
         )
     else:
         return tuple([gr.update() for _ in range(7)])
 
+
 def reset_to_defaults():
     """Reset all parameters to default values."""
     return load_parameter_preset("default")
+
 
 def initialize_engine(
     model_path: str = DEFAULT_MODEL_PATH,
     audio_tokenizer_path: str = DEFAULT_AUDIO_TOKENIZER_PATH,
     tokenizer_path: str = DEFAULT_MODEL_PATH,
     device: str = None,
-    load_in_8bit: bool = False
+    load_in_8bit: bool = False,
 ):
     """
     Initialize the HiggsAudio serving engine with optimizations for 16GB VRAM or less.
-    
+
     Args:
         model_path: Path to the HiggsAudio model
         audio_tokenizer_path: Path to the audio tokenizer
         tokenizer_path: Path to the tokenizer (optional)
         device: Device to use for inference (auto-detected if None)
         load_in_8bit: Whether to load model in 8-bit quantized mode
-    
+
     Returns:
         Status message and model status display
     """
     global engine, is_initialized
-    
+
     try:
         # Validate and set default paths if empty
         if not model_path or model_path.strip() == "":
             model_path = DEFAULT_MODEL_PATH
             logger.warning(f"Empty model path provided, using default: {model_path}")
-        
+
         if not audio_tokenizer_path or audio_tokenizer_path.strip() == "":
             audio_tokenizer_path = DEFAULT_AUDIO_TOKENIZER_PATH
-            logger.warning(f"Empty audio tokenizer path provided, using default: {audio_tokenizer_path}")
-        
+            logger.warning(
+                f"Empty audio tokenizer path provided, using default: {audio_tokenizer_path}"
+            )
+
         # Handle optional tokenizer path
         if not tokenizer_path or tokenizer_path.strip() == "":
             tokenizer_path = DEFAULT_MODEL_PATH
@@ -360,37 +412,43 @@ def initialize_engine(
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             gc.collect()
-        
+
         if device is None:
             device = get_current_device()
-            
+
         logger.info(f"Initializing HiggsAudio engine with 8-bit: {load_in_8bit}")
-        
+
         # Set optimized KV cache lengths for lower VRAM usage
         if load_in_8bit:
             kv_cache_lengths = [512, 1024, 2048]  # Smaller cache sizes for 8-bit
         else:
             kv_cache_lengths = [1024, 2048, 4096]  # Standard cache sizes
-        
+
         engine = HiggsAudioServeEngine(
             model_name_or_path=model_path,
             audio_tokenizer_name_or_path=audio_tokenizer_path,
             tokenizer_name_or_path=tokenizer_path,
             device=device,
-            kv_cache_lengths=kv_cache_lengths
+            kv_cache_lengths=kv_cache_lengths,
         )
-        
+
         is_initialized = True
-        
+
         # Get memory info after initialization
         memory_info = get_gpu_memory_info()
-        quantization_info = " (8-bit quantized)" if load_in_8bit else " (full precision)"
+        quantization_info = (
+            " (8-bit quantized)" if load_in_8bit else " (full precision)"
+        )
         status_msg = f"✅ Model successfully loaded on {device}{quantization_info}! Ready to generate speech.\n\n{memory_info}"
-        status_display = "🟢 **Model Status:** Ready - Model loaded and ready for speech generation"
-        
-        logger.info(f"Successfully initialized HiggsAudioServeEngine with model: {model_path}")
+        status_display = (
+            "🟢 **Model Status:** Ready - Model loaded and ready for speech generation"
+        )
+
+        logger.info(
+            f"Successfully initialized HiggsAudioServeEngine with model: {model_path}"
+        )
         return status_msg, status_display
-        
+
     except Exception as e:
         is_initialized = False
         engine = None
@@ -399,10 +457,12 @@ def initialize_engine(
         status_display = f"🔴 **Model Status:** Error - {str(e)}"
         return error_msg, status_display
 
+
 def process_text_output(text_output: str):
     """Remove all the continuous <|AUDIO_OUT|> tokens with a single <|AUDIO_OUT|>."""
     text_output = re.sub(r"(<\|AUDIO_OUT\|>)+", r"<|AUDIO_OUT|>", text_output)
     return text_output
+
 
 def prepare_chatml_sample(
     voice_preset: str,
@@ -430,7 +490,9 @@ def prepare_chatml_sample(
         # Voice preset
         voice_path, ref_text = get_voice_preset(voice_preset)
         if voice_path is None:
-            logger.warning(f"Voice preset {voice_preset} not found, skipping reference audio")
+            logger.warning(
+                f"Voice preset {voice_preset} not found, skipping reference audio"
+            )
         else:
             audio_base64 = encode_audio_file(voice_path)
 
@@ -438,7 +500,7 @@ def prepare_chatml_sample(
     if audio_base64 is not None:
         # Add user message with reference text
         messages.append(Message(role="user", content=ref_text))
-        
+
         # Add assistant message with audio content
         audio_content = AudioContent(raw_audio=audio_base64, audio_url="")
         messages.append(Message(role="assistant", content=[audio_content]))
@@ -448,6 +510,7 @@ def prepare_chatml_sample(
     messages.append(Message(role="user", content=text))
 
     return ChatMLSample(messages=messages)
+
 
 def text_to_speech(
     text,
@@ -472,14 +535,16 @@ def text_to_speech(
             audio_tokenizer_path=DEFAULT_AUDIO_TOKENIZER_PATH,
             tokenizer_path=DEFAULT_MODEL_PATH,
             device=None,
-            load_in_8bit=False
+            load_in_8bit=False,
         )
         if "Error" in init_result[0]:
             return init_result[0], None, init_result[1]
 
     try:
         # Prepare ChatML sample
-        chatml_sample = prepare_chatml_sample(voice_preset, text, reference_audio, reference_text, system_prompt)
+        chatml_sample = prepare_chatml_sample(
+            voice_preset, text, reference_audio, reference_text, system_prompt
+        )
 
         # Convert stop strings format
         stop_list = _extract_stop_strings(stop_strings)
@@ -513,29 +578,36 @@ def text_to_speech(
         if response.audio is not None:
             # Save the generated audio to a temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-                # Convert to proper format for torchaudio
-                audio_tensor = torch.from_numpy(response.audio)[None, :]
-                torchaudio.save(tmp_file.name, audio_tensor, response.sampling_rate)
-                
-                return f"✅ {text_output}\n\nGenerated in {generation_time:.3f}s", tmp_file.name, "🟢 **Model Status:** Ready - Model loaded and ready for speech generation"
+                sf.write(tmp_file.name, response.audio, response.sampling_rate)
+
+                return (
+                    f"✅ {text_output}\n\nGenerated in {generation_time:.3f}s",
+                    tmp_file.name,
+                    "🟢 **Model Status:** Ready - Model loaded and ready for speech generation",
+                )
         else:
             logger.warning("No audio generated")
-            return f"⚠️ {text_output}\n\nNo audio generated", None, "🟢 **Model Status:** Ready - Model loaded and ready for speech generation"
+            return (
+                f"⚠️ {text_output}\n\nNo audio generated",
+                None,
+                "🟢 **Model Status:** Ready - Model loaded and ready for speech generation",
+            )
 
     except Exception as e:
         error_msg = f"Error generating speech: {e}"
         logger.error(error_msg)
         return f"❌ {error_msg}", None, f"🔴 **Model Status:** Error - {str(e)}"
 
+
 def create_gradio_interface():
     """Create the enhanced Gradio interface for HiggsAudio with all advanced features."""
-    
+
     # Load theme and voice presets
     try:
         my_theme = gr.Theme.load("theme.json")
     except:
         my_theme = gr.themes.Default()
-    
+
     global VOICE_PRESETS
     VOICE_PRESETS = load_voice_presets()
 
@@ -558,13 +630,19 @@ def create_gradio_interface():
     """
 
     default_template = "smart-voice"
-    
-    with gr.Blocks(theme=my_theme, css=custom_css, title="HiggsAudio Enhanced Interface") as interface:
+
+    with gr.Blocks(
+        theme=my_theme, css=custom_css, title="HiggsAudio Enhanced Interface"
+    ) as interface:
         gr.Markdown("# HiggsAudio V2 Enhanced Text-to-Speech Interface")
-        gr.Markdown("Generate expressive speech with voice cloning, multi-speaker support, background music, and 8-bit quantization support.")
+        gr.Markdown(
+            "Generate expressive speech with voice cloning, multi-speaker support, background music, and 8-bit quantization support."
+        )
 
         # Model status indicator
-        model_status_display = gr.Markdown("🔴 **Model Status:** Not initialized - Click 'Initialize' below to start")
+        model_status_display = gr.Markdown(
+            "🔴 **Model Status:** Not initialized - Click 'Initialize' below to start"
+        )
 
         with gr.Row():
             with gr.Column(scale=2):
@@ -604,7 +682,9 @@ def create_gradio_interface():
                     visible=False,
                 )
 
-                with gr.Accordion("Custom Reference (Optional)", open=False, visible=False) as custom_reference_accordion:
+                with gr.Accordion(
+                    "Custom Reference (Optional)", open=False, visible=False
+                ) as custom_reference_accordion:
                     reference_audio = gr.Audio(label="Reference Audio", type="filepath")
                     reference_text = gr.TextArea(
                         label="Reference Text (transcript of the reference audio)",
@@ -627,8 +707,12 @@ def create_gradio_interface():
                         step=0.1,
                         label="Temperature",
                     )
-                    top_p = gr.Slider(minimum=0.1, maximum=1.0, value=0.95, step=0.05, label="Top P")
-                    top_k = gr.Slider(minimum=-1, maximum=100, value=50, step=1, label="Top K")
+                    top_p = gr.Slider(
+                        minimum=0.1, maximum=1.0, value=0.95, step=0.05, label="Top P"
+                    )
+                    top_k = gr.Slider(
+                        minimum=-1, maximum=100, value=50, step=1, label="Top K"
+                    )
                     ras_win_len = gr.Slider(
                         minimum=0,
                         maximum=10,
@@ -660,33 +744,59 @@ def create_gradio_interface():
                         parameter_preset_dropdown = gr.Dropdown(
                             choices=[
                                 ("Default - Balanced quality and speed", "default"),
-                                ("Female Voice - Optimized for female speech", "female_voice"),
-                                ("Male Voice - Optimized for male speech", "male_voice"),
-                                ("High Quality - Conservative settings for best quality", "high_quality"),
-                                ("Creative - More expressive and varied output", "creative"),
-                                ("Fast - Quick generation with shorter output", "fast")
+                                (
+                                    "Female Voice - Optimized for female speech",
+                                    "female_voice",
+                                ),
+                                (
+                                    "Male Voice - Optimized for male speech",
+                                    "male_voice",
+                                ),
+                                (
+                                    "High Quality - Conservative settings for best quality",
+                                    "high_quality",
+                                ),
+                                (
+                                    "Creative - More expressive and varied output",
+                                    "creative",
+                                ),
+                                ("Fast - Quick generation with shorter output", "fast"),
                             ],
                             value="default",
                             label="Parameter Presets",
-                            info="Choose preset parameter configurations"
+                            info="Choose preset parameter configurations",
                         )
-                        load_param_preset_btn = gr.Button("📋 Load Parameters", variant="secondary")
-                    
-                    reset_defaults_btn = gr.Button("🔄 Reset All to Defaults", variant="secondary")
+                        load_param_preset_btn = gr.Button(
+                            "📋 Load Parameters", variant="secondary"
+                        )
+
+                    reset_defaults_btn = gr.Button(
+                        "🔄 Reset All to Defaults", variant="secondary"
+                    )
 
                 generate_btn = gr.Button("Generate Speech", variant="primary")
 
             with gr.Column(scale=2):
                 output_text = gr.TextArea(label="Model Response", lines=3)
-                output_audio = gr.Audio(label="Generated Audio", interactive=False, autoplay=True)
-                preset_status_display = gr.Textbox(label="Parameter Status", interactive=False, placeholder="Parameter presets can be loaded from Advanced Settings")
+                output_audio = gr.Audio(
+                    label="Generated Audio", interactive=False, autoplay=True
+                )
+                preset_status_display = gr.Textbox(
+                    label="Parameter Status",
+                    interactive=False,
+                    placeholder="Parameter presets can be loaded from Advanced Settings",
+                )
 
         # Voice samples section
         with gr.Row(visible=False) as voice_samples_section:
             voice_samples_table = gr.Dataframe(
                 headers=["Voice Preset", "Sample Text"],
                 datatype=["str", "str"],
-                value=[[preset, text] for preset, text in VOICE_PRESETS.items() if preset != "EMPTY"],
+                value=[
+                    [preset, text]
+                    for preset, text in VOICE_PRESETS.items()
+                    if preset != "EMPTY"
+                ],
                 interactive=False,
             )
             sample_audio = gr.Audio(label="Voice Sample")
@@ -695,52 +805,62 @@ def create_gradio_interface():
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### 🚀 Model Setup & Configuration")
-                gr.Markdown("*Configure and initialize the HiggsAudio model (first-time setup may take 5-10 minutes)*")
-                
+                gr.Markdown(
+                    "*Configure and initialize the HiggsAudio model (first-time setup may take 5-10 minutes)*"
+                )
+
                 # Model configuration section
                 with gr.Accordion("🔧 Model Configuration", open=False):
                     model_path = gr.Textbox(
                         label="Model Path",
                         placeholder="Enter model name or path",
                         value=DEFAULT_MODEL_PATH,
-                        info="Path to the HiggsAudio model (Pinokio: models/higgs-audio-v2-generation-3B-base)"
+                        info="Path to the HiggsAudio model (Pinokio: models/higgs-audio-v2-generation-3B-base)",
                     )
-                    
+
                     audio_tokenizer_path = gr.Textbox(
-                        label="Audio Tokenizer Path", 
+                        label="Audio Tokenizer Path",
                         placeholder="Enter audio tokenizer name or path",
                         value=DEFAULT_AUDIO_TOKENIZER_PATH,
-                        info="Path to the audio tokenizer (Pinokio: models/higgs-audio-v2-tokenizer)"
+                        info="Path to the audio tokenizer (Pinokio: models/higgs-audio-v2-tokenizer)",
                     )
-                    
+
                     tokenizer_path = gr.Textbox(
                         label="Tokenizer Path (Optional)",
                         placeholder="Leave empty to use model path",
-                        info="Optional separate tokenizer path"
+                        info="Optional separate tokenizer path",
                     )
-                    
+
                     device = gr.Dropdown(
                         choices=["cuda", "cpu"],
                         value="cuda" if torch.cuda.is_available() else "cpu",
                         label="Device",
-                        info="Device to use for inference"
+                        info="Device to use for inference",
                     )
-                
+
                 with gr.Accordion("⚙️ Model Loading Options", open=True):
                     gr.Markdown("**🚀 Model Loading Configuration:**")
-                    gr.Markdown("• **8-bit Quantization**: ~50% less VRAM usage, minimal quality impact")
-                    gr.Markdown("• **Memory Info**: Check current VRAM usage before loading")
-                    
+                    gr.Markdown(
+                        "• **8-bit Quantization**: ~50% less VRAM usage, minimal quality impact"
+                    )
+                    gr.Markdown(
+                        "• **Memory Info**: Check current VRAM usage before loading"
+                    )
+
                     load_in_8bit_checkbox = gr.Checkbox(
                         label="Enable 8-bit Quantization",
                         value=False,
-                        info="Reduces VRAM usage by ~50%, recommended for GPUs with 16GB or less"
+                        info="Reduces VRAM usage by ~50%, recommended for GPUs with 16GB or less",
                     )
-                    
+
                     with gr.Row():
-                        reload_model_btn = gr.Button("🔄 Load/Reload Model", variant="primary")
-                        memory_info_btn = gr.Button("📊 Check GPU Memory", variant="secondary")
-                    
+                        reload_model_btn = gr.Button(
+                            "🔄 Load/Reload Model", variant="primary"
+                        )
+                        memory_info_btn = gr.Button(
+                            "📊 Check GPU Memory", variant="secondary"
+                        )
+
                     gr.Markdown(
                         """
                         **8-bit Quantization Benefits:**
@@ -750,14 +870,22 @@ def create_gradio_interface():
                         - Automatically optimizes KV cache sizes for lower memory usage
                         """
                     )
-                
-                init_status = gr.Textbox(label="Status", interactive=False, placeholder="Click 'Load/Reload Model' to initialize the model...")
-                memory_status = gr.Markdown("Click 'Check GPU Memory' to see current VRAM usage")
+
+                init_status = gr.Textbox(
+                    label="Status",
+                    interactive=False,
+                    placeholder="Click 'Load/Reload Model' to initialize the model...",
+                )
+                memory_status = gr.Markdown(
+                    "Click 'Check GPU Memory' to see current VRAM usage"
+                )
 
         # Event handlers
         def play_voice_sample(evt: gr.SelectData):
             try:
-                preset_names = [preset for preset in VOICE_PRESETS.keys() if preset != "EMPTY"]
+                preset_names = [
+                    preset for preset in VOICE_PRESETS.keys() if preset != "EMPTY"
+                ]
                 if evt.index[0] < len(preset_names):
                     preset = preset_names[evt.index[0]]
                     voice_path, _ = get_voice_preset(preset)
@@ -785,7 +913,11 @@ def create_gradio_interface():
                     template["system_prompt"],
                     template["input_text"],
                     description_text,
-                    gr.update(value=voice_preset_value, interactive=is_voice_clone, visible=is_voice_clone),
+                    gr.update(
+                        value=voice_preset_value,
+                        interactive=is_voice_clone,
+                        visible=is_voice_clone,
+                    ),
                     gr.update(visible=is_voice_clone),
                     gr.update(visible=is_voice_clone),
                     ras_win_len_value,
@@ -832,14 +964,17 @@ def create_gradio_interface():
         # Model reload button with 8-bit checkbox
         reload_model_btn.click(
             fn=initialize_engine,
-            inputs=[model_path, audio_tokenizer_path, tokenizer_path, device, load_in_8bit_checkbox],
-            outputs=[init_status, model_status_display]
+            inputs=[
+                model_path,
+                audio_tokenizer_path,
+                tokenizer_path,
+                device,
+                load_in_8bit_checkbox,
+            ],
+            outputs=[init_status, model_status_display],
         )
 
-        memory_info_btn.click(
-            fn=get_gpu_memory_info,
-            outputs=[memory_status]
-        )
+        memory_info_btn.click(fn=get_gpu_memory_info, outputs=[memory_status])
 
         # Parameter preset event handlers
         load_param_preset_btn.click(
@@ -853,7 +988,7 @@ def create_gradio_interface():
                 ras_win_len,
                 ras_win_max_num_repeat,
                 preset_status_display,
-            ]
+            ],
         )
 
         reset_defaults_btn.click(
@@ -866,21 +1001,22 @@ def create_gradio_interface():
                 ras_win_len,
                 ras_win_max_num_repeat,
                 preset_status_display,
-            ]
+            ],
         )
-    
+
     return interface
+
 
 if __name__ == "__main__":
     # Set up logging
     logging.basicConfig(level=logging.INFO)
-    
+
     # Parse command line arguments for enhanced functionality
     parser = argparse.ArgumentParser(description="Enhanced HiggsAudio V2 Gradio Interface")
     parser.add_argument("--host", default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"), help="Host to bind to (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=7860, help="Port to bind to (default: 7860)")
     parser.add_argument("--share", action="store_true", help="Enable public sharing via Gradio")
-    
+
     args = parser.parse_args()
 
     print(f"Starting Enhanced HiggsAudio V2 interface on {args.host}:{args.port}")
@@ -888,11 +1024,7 @@ if __name__ == "__main__":
         print("Public sharing enabled via Gradio")
     else:
         print("Local access only")
-    
+
     # Create and launch the interface
     interface = create_gradio_interface()
-    interface.launch(
-        server_name=args.host,
-        server_port=args.port,
-        share=args.share
-    )
+    interface.launch(server_name=args.host, server_port=args.port, share=args.share)
