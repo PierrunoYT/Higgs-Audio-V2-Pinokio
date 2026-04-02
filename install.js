@@ -32,17 +32,6 @@ module.exports = {
       }
     },
 
-    // Install Spaces helper used by app.py decorators
-    {
-      method: "shell.run",
-      params: {
-        venv: "env",
-        message: [
-          "uv pip install spaces"
-        ]
-      }
-    },
-
     // Install boson_multimodal package in development mode
     {
       method: "shell.run",

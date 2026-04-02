@@ -4,6 +4,7 @@ Gradio UI for Text-to-Speech using HiggsAudioServeEngine
 
 import argparse
 import base64
+import inspect
 import os
 import uuid
 import json
@@ -14,8 +15,24 @@ import numpy as np
 import time
 from functools import lru_cache
 import re
-import spaces
 import torch
+
+try:
+    import spaces
+except Exception:
+    def _gpu_decorator(*args, **kwargs):
+        if args and callable(args[0]) and len(args) == 1 and not kwargs:
+            return args[0]
+
+        def _inner(func):
+            return func
+
+        return _inner
+
+    class _SpacesFallback:
+        GPU = staticmethod(_gpu_decorator)
+
+    spaces = _SpacesFallback()
 
 # Import HiggsAudio components
 from higgs_audio.serve.serve_engine import HiggsAudioServeEngine
@@ -689,7 +706,13 @@ def main():
 
     # Create and launch the UI
     demo = create_ui()
-    demo.launch(server_name=args.host, server_port=args.port, mcp_server=True)
+    launch_kwargs = {
+        "server_name": args.host,
+        "server_port": args.port,
+    }
+    if "mcp_server" in inspect.signature(demo.launch).parameters:
+        launch_kwargs["mcp_server"] = True
+    demo.launch(**launch_kwargs)
 
 
 if __name__ == "__main__":
