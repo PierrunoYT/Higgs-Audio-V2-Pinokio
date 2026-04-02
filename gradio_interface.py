@@ -10,7 +10,6 @@ import os
 import argparse
 import torch
 import tempfile
-import uuid
 import logging
 import json
 import time
@@ -18,7 +17,7 @@ import gc
 import base64
 import soundfile as sf
 
-from typing import Optional, Any, List
+from typing import Any, List
 
 # HiggsAudio API imports
 from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine
@@ -39,7 +38,6 @@ DEFAULT_SYSTEM_PROMPT = (
     "<|scene_desc_end|>"
 )
 DEFAULT_STOP_STRINGS = ["<|end_of_text|>", "<|eot_id|>"]
-SAMPLE_RATE = 24000
 
 # --- Preconfigured prompts and parameter sets ---
 EXAMPLES = {
@@ -117,19 +115,35 @@ def normalize_text(txt: str) -> str:
 
 def stop_strings_from_table(stops: Any) -> List[str]:
     # Handles both pandas.DataFrame and list-like inputs without ambiguous truthiness.
-    import pandas as pd
-
     if stops is None:
         return DEFAULT_STOP_STRINGS
 
+    pd = None
+    try:
+        import pandas as _pd
+        pd = _pd
+    except Exception:
+        pd = None
+
     try:
         # Gradio Dataframe can provide a pandas.DataFrame.
-        if isinstance(stops, pd.DataFrame):
+        if pd is not None and isinstance(stops, pd.DataFrame):
             if stops.empty:
                 return DEFAULT_STOP_STRINGS
             rows = stops.values.tolist()
+        # Fallback for dataframe-like objects when pandas isn't available.
+        elif hasattr(stops, "values") and hasattr(stops, "columns"):
+            try:
+                rows = stops.values.tolist()
+            except Exception:
+                rows = []
         else:
             rows = stops
+
+        if isinstance(rows, str):
+            rows = [rows]
+        elif not isinstance(rows, (list, tuple)):
+            rows = [rows]
 
         flat: List[str] = []
         for row in rows:
@@ -141,7 +155,15 @@ def stop_strings_from_table(stops: Any) -> List[str]:
                 text = value.strip()
                 if text:
                     flat.append(text)
-            elif pd.notna(value):
+            else:
+                is_na = False
+                if pd is not None:
+                    try:
+                        is_na = bool(pd.isna(value))
+                    except Exception:
+                        is_na = False
+                if is_na:
+                    continue
                 text = str(value).strip()
                 if text:
                     flat.append(text)
@@ -238,14 +260,9 @@ def tts(
 # --- Gradio Interface ---
 
 def gradio_ui():
-    # Preset loading
-    def set_example(name):
-        d = EXAMPLES[name]
-        return d["system_prompt"], d["input_text"]
-
-    def set_params(name):
-        d = PARAM_PRESETS[name]
-        return d["temperature"], d["top_p"], d["top_k"], d["max_tokens"]
+    def init_model(m, a, d, f):
+        msg = load_engine(m, a, d, f)
+        return msg, f"Status: {msg}"
 
     with gr.Blocks(title="HiggsAudio V2 Interface") as demo:
         gr.Markdown("## HiggsAudio V2 Text-to-Speech")
@@ -315,9 +332,9 @@ def gradio_ui():
             outputs=[temperature, top_p, top_k, max_tokens, preset_info]
         )
         init_btn.click(
-            fn=lambda m, a, d, f: load_engine(m, a, d, f),
+            fn=init_model,
             inputs=[mpath, apath, devsel, fp16box],
-            outputs=model_msg
+            outputs=[model_msg, model_status]
         )
         gpuinfo_btn.click(fn=get_gpu_info, outputs=model_msg)
         gen_btn.click(
