@@ -513,7 +513,7 @@ def create_ui():
     default_template = "smart-voice"
 
     """Create the Gradio UI."""
-    with gr.Blocks(theme=my_theme, css=custom_css) as demo:
+    with gr.Blocks() as demo:
         gr.Markdown("# Higgs Audio Text-to-Speech Playground")
 
         # Main UI section
@@ -605,7 +605,7 @@ def create_ui():
                         datatype=["str"],
                         value=[[s] for s in DEFAULT_STOP_STRINGS],
                         interactive=True,
-                        col_count=(1, "fixed"),
+                        column_count=(1, "fixed"),
                     )
 
                 submit_btn = gr.Button("Generate Speech", variant="primary", scale=1)
@@ -748,7 +748,7 @@ def create_ui():
             js="() => {const audio = document.querySelector('audio'); if(audio) audio.pause(); return null;}",
         )
 
-    return demo
+    return demo, my_theme, custom_css
 
 
 def main():
@@ -763,8 +763,8 @@ def main():
         choices=["cuda", "cpu"],
         help="Device to run the model on.",
     )
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host for the Gradio interface.")
-    parser.add_argument("--port", type=int, default=7860, help="Port for the Gradio interface.")
+    parser.add_argument("--host", type=str, default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"), help="Host for the Gradio interface.")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("GRADIO_SERVER_PORT", "7860")), help="Port for the Gradio interface.")
 
     args = parser.parse_args()
 
@@ -772,13 +772,16 @@ def main():
     VOICE_PRESETS = load_voice_presets()
 
     # Create and launch the UI
-    demo = create_ui()
+    demo, my_theme, custom_css = create_ui()
     launch_kwargs = {
         "server_name": args.host,
         "server_port": args.port,
     }
-    if "mcp_server" in inspect.signature(demo.launch).parameters:
-        launch_kwargs["mcp_server"] = True
+    launch_params = inspect.signature(demo.launch).parameters
+    if "theme" in launch_params:
+        launch_kwargs["theme"] = my_theme
+    if "css" in launch_params:
+        launch_kwargs["css"] = custom_css
     demo.launch(**launch_kwargs)
 
 

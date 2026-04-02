@@ -15,7 +15,7 @@ module.exports = async (kernel) => {
             "python app.py"
           ],
           on: [{
-            event: "/(http:\\/\\/\\S+)/",
+            event: "/(http:\\/\\/[0-9.:]+)/",
             done: true
           }]
         }
@@ -23,7 +23,7 @@ module.exports = async (kernel) => {
       {
         method: "local.set",
         params: {
-          url: `http://localhost:${port}`
+          url: "{{input.event[1]}}"
         }
       }
     ]
