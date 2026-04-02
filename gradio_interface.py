@@ -1,1091 +1,283 @@
 """
-Enhanced Gradio interface for HiggsAudio model serving.
-Provides a comprehensive web UI for the main public HiggsAudio workflows:
-smart voice generation, zero-shot voice cloning, multi-speaker dialogue,
-and optional lower-VRAM loading.
+Completely rewritten: Minimal, clean Gradio interface for HiggsAudio model serving.
+Focus: Modular, extensible, robust, and straightforward UI for text-to-speech with cloning.
 """
 
-import argparse
-import base64
-import logging
-import os
-import uuid
-import json
-from typing import Any, Dict, List, Optional
 import gradio as gr
-import numpy as np
-import time
-from functools import lru_cache
+import os
+import argparse
 import torch
-import soundfile as sf
 import tempfile
+import uuid
+import logging
+import json
+import time
 import gc
+import base64
+import soundfile as sf
 
-# Import HiggsAudio components
-from boson_multimodal.serve.serve_engine import (
-    HiggsAudioServeEngine,
-    HiggsAudioResponse,
-)
+from typing import Optional, Any, List
+
+# HiggsAudio API imports
+from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine
 from boson_multimodal.data_types import ChatMLSample, AudioContent, Message
 
-# Set up logging
+# --- Logging and Constants ---
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global variables to store the engine and initialization state
-engine = None
-is_initialized = False
-
-# Default model configuration - keeping Pinokio paths
-DEFAULT_MODEL_PATH = "models/higgs-audio-v2-generation-3B-base"
-DEFAULT_AUDIO_TOKENIZER_PATH = "models/higgs-audio-v2-tokenizer"
-SAMPLE_RATE = 24000
-
+ROOT = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_MODEL_PATH = os.path.join(ROOT, "models/higgs-audio-v2-generation-3B-base")
+DEFAULT_AUDIO_TOKENIZER_PATH = os.path.join(ROOT, "models/higgs-audio-v2-tokenizer")
 DEFAULT_SYSTEM_PROMPT = (
-    "Generate audio following instruction.\n"
-    "Speak only the provided content. Do not add extra words, sound effects, speaker names, or narration unless they are explicitly included.\n"
-    "Stay faithful to the text and keep the delivery clear and natural.\n\n"
+    "Generate audio following instruction. Only speak the provided content.\n"
+    "Stay faithful to the text and keep the delivery clear and natural.\n"
     "<|scene_desc_start|>\n"
     "Audio is recorded from a quiet room.\n"
     "<|scene_desc_end|>"
 )
-
 DEFAULT_STOP_STRINGS = ["<|end_of_text|>", "<|eot_id|>"]
+SAMPLE_RATE = 24000
 
-# Predefined examples for system and input messages
-PREDEFINED_EXAMPLES = {
-    "voice-clone": {
+# --- Preconfigured prompts and parameter sets ---
+EXAMPLES = {
+    "Simple": {
+        "system_prompt": DEFAULT_SYSTEM_PROMPT,
+        "input_text": "The road not taken by Robert Frost.",
+        "desc": "Simple single-speaker TTS."
+    },
+    "Clone": {
         "system_prompt": "",
-        "input_text": "Hey there! I'm your friendly voice twin in the making. Pick a voice preset below or upload your own audio - let's clone some vocals and bring your voice to life! ",
-        "description": "Zero-shot voice cloning. HiggsAudio copies the speaker style from a short reference clip, then speaks the new text in that voice.",
-    },
-    "smart-voice": {
-        "system_prompt": DEFAULT_SYSTEM_PROMPT,
-        "input_text": "The sun rises in the east and sets in the west. This simple fact has been observed by humans for thousands of years.",
-        "description": "Single-speaker smart voice. The model uses the system and scene prompt to choose delivery, pacing, and tone without a reference clip.",
-    },
-    "multispeaker-voice-description": {
-        "system_prompt": "You are an AI assistant designed to convert text into speech.\n"
-        "If the user's message includes a [SPEAKER*] tag, do not read out the tag and generate speech for the following text, using the specified voice.\n"
-        "If no speaker tag is present, select a suitable voice on your own.\n\n"
-        "<|scene_desc_start|>\n"
-        "SPEAKER0: feminine\n"
-        "SPEAKER1: masculine\n"
-        "<|scene_desc_end|>",
-        "input_text": "[SPEAKER0] I can't believe you did that without even asking me first!\n"
-        "[SPEAKER1] Oh, come on! It wasn't a big deal, and I knew you would overreact like this.\n"
-        "[SPEAKER0] Overreact? You made a decision that affects both of us without even considering my opinion!\n"
-        "[SPEAKER1] Because I didn't have time to sit around waiting for you to make up your mind! Someone had to act.",
-        "description": "Multi-speaker dialogue generation. Speaker tags in the text plus scene instructions help HiggsAudio keep voices separated across the conversation.",
-    },
-    "single-speaker-voice-description": {
-        "system_prompt": "Generate audio following instruction.\n\n"
-        "<|scene_desc_start|>\n"
-        "SPEAKER0: He speaks with a clear British accent and a conversational, inquisitive tone. His delivery is articulate and at a moderate pace, and very clear audio.\n"
-        "<|scene_desc_end|>",
-        "input_text": "Hey, everyone! Welcome back to Tech Talk Tuesdays.\n"
-        "It's your host, Alex, and today, we're diving into a topic that's become absolutely crucial in the tech world — deep learning.\n"
-        "And let's be honest, if you've been even remotely connected to tech, AI, or machine learning lately, you know that deep learning is everywhere.\n"
-        "\n"
-        "So here's the big question: Do you want to understand how deep learning works?\n",
-        "description": "Conditioned single-speaker generation. Use the scene prompt to describe accent, energy, recording conditions, or delivery style.",
-    },
-    "single-speaker-zh": {
-        "system_prompt": "Generate audio following instruction.\n\n"
-        "<|scene_desc_start|>\n"
-        "Audio is recorded from a quiet room.\n"
-        "<|scene_desc_end|>",
-        "input_text": "大家好, 欢迎收听本期的跟李沐学AI. 今天沐哥在忙着洗数据, 所以由我, 希格斯主播代替他讲这期视频.\n"
-        "今天我们要聊的是一个你绝对不能忽视的话题: 多模态学习.\n"
-        "那么, 问题来了, 你真的了解多模态吗? 你知道如何自己动手构建多模态大模型吗.\n"
-        "或者说, 你能察觉到我其实是个机器人吗?",
-        "description": "Single-speaker multilingual generation example using Chinese input.",
-    },
-    "single-speaker-bgm": {
-        "system_prompt": DEFAULT_SYSTEM_PROMPT,
-        "input_text": "[music start] I will remember this, thought Ender, when I am defeated. To keep dignity, and give honor where it's due, so that defeat is not disgrace. And I hope I don't have to do it often. [music end]",
-        "description": "Experimental speech plus music control using inline audio tags. Results can vary and may need a few retries.",
+        "input_text": "Say something in the style of the sample clip.",
+        "desc": "Voice cloning via reference audio."
     },
 }
-
-# Parameter presets for different use cases
-PARAMETER_PRESETS = {
+PARAM_PRESETS = {
     "default": {
-        "temperature": 0.15,
+        "temperature": 0.2,
         "top_p": 0.9,
         "top_k": 30,
-        "max_completion_tokens": 896,
-        "ras_win_len": 8,
-        "ras_win_max_num_repeat": 2,
-        "description": "Safer default tuned to reduce hallucinations and repetition",
+        "max_tokens": 896,
+        "desc": "Balanced default."
     },
-    "female_voice": {
-        "temperature": 0.3,
-        "top_p": 0.95,
-        "top_k": 50,
-        "max_completion_tokens": 1024,
-        "ras_win_len": 7,
-        "ras_win_max_num_repeat": 2,
-        "description": "Optimized settings for female voice generation",
-    },
-    "male_voice": {
-        "temperature": 0.3,
-        "top_p": 0.95,
-        "top_k": 50,
-        "max_completion_tokens": 1024,
-        "ras_win_len": 7,
-        "ras_win_max_num_repeat": 2,
-        "description": "Optimized settings for male voice generation",
-    },
-    "high_quality": {
-        "temperature": 0.1,
-        "top_p": 0.88,
-        "top_k": 20,
-        "max_completion_tokens": 896,
-        "ras_win_len": 8,
-        "ras_win_max_num_repeat": 2,
-        "description": "Conservative settings for highest quality output",
-    },
-    "faithful_tts": {
+    "faithful": {
         "temperature": 0.0,
         "top_p": 0.85,
         "top_k": 10,
-        "max_completion_tokens": 768,
-        "ras_win_len": 8,
-        "ras_win_max_num_repeat": 2,
-        "description": "Most conservative settings for transcript-faithful speech with minimal improvisation",
-    },
-    "creative": {
-        "temperature": 0.7,
-        "top_p": 0.95,
-        "top_k": 80,
-        "max_completion_tokens": 1024,
-        "ras_win_len": 7,
-        "ras_win_max_num_repeat": 2,
-        "description": "Higher temperature for more expressive and varied output",
-    },
-    "fast": {
-        "temperature": 0.3,
-        "top_p": 0.95,
-        "top_k": 50,
-        "max_completion_tokens": 512,
-        "ras_win_len": 7,
-        "ras_win_max_num_repeat": 2,
-        "description": "Faster generation with shorter output",
+        "max_tokens": 768,
+        "desc": "Faithful, less hallucination."
     },
 }
 
-# Defaults for UI sliders and text_to_speech — must match the "default" preset
-DEFAULT_GEN_PARAMS = PARAMETER_PRESETS["default"]
+VOICE_PRESETS = {"EMPTY": "No reference"}
+ENGINE = None
 
-# Voice presets will be loaded from config
-VOICE_PRESETS = {}
+# --- Utility Functions ---
 
-
-@lru_cache(maxsize=20)
-def encode_audio_file(file_path):
-    """Encode an audio file to base64."""
-    with open(file_path, "rb") as audio_file:
-        return base64.b64encode(audio_file.read()).decode("utf-8")
-
-
-def get_current_device():
-    """Get the current device."""
+def get_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
-
-def get_gpu_memory_info():
-    """Get GPU memory usage information."""
+def get_gpu_info():
     if not torch.cuda.is_available():
-        return "❌ CUDA not available"
+        return "CUDA not available."
+    d = torch.cuda.current_device()
+    total = torch.cuda.get_device_properties(d).total_memory / 2**30
+    used = torch.cuda.memory_allocated(d) / 2**30
+    free = total - used
+    pct = 100 * used / total
+    return f"GPU (CUDA): {used:.1f}GB used / {total:.1f}GB total ({pct:.1f}% used, {free:.1f}GB free)"
 
+def base64_audio(filepath):
+    with open(filepath, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+def normalize_text(txt: str) -> str:
+    # Could add other normalization here
+    return txt.strip() if txt else ""
+
+def stop_strings_from_table(stops: Any) -> List[str]:
+    if not stops:
+        return DEFAULT_STOP_STRINGS
     try:
-        device = torch.cuda.current_device()
-        total_memory = torch.cuda.get_device_properties(device).total_memory
-        allocated_memory = torch.cuda.memory_allocated(device)
-        cached_memory = torch.cuda.memory_reserved(device)
-        free_memory = total_memory - allocated_memory
+        if isinstance(stops, list):
+            flat = []
+            for row in stops:
+                if isinstance(row, (list, tuple)):
+                    v = row[0] if row else ""
+                else:
+                    v = row
+                if v and isinstance(v, str) and v.strip():
+                    flat.append(v.strip())
+            return flat if flat else DEFAULT_STOP_STRINGS
+    except Exception:
+        pass
+    return DEFAULT_STOP_STRINGS
 
-        total_gb = total_memory / 1024**3
-        allocated_gb = allocated_memory / 1024**3
-        cached_gb = cached_memory / 1024**3
-        free_gb = free_memory / 1024**3
+# --- Model Initialization & TTS ---
 
-        usage_percent = (allocated_memory / total_memory) * 100
-
-        return (
-            f"🔍 **GPU Memory Status:**\n"
-            f"- **Total VRAM:** {total_gb:.1f} GB\n"
-            f"- **Allocated:** {allocated_gb:.1f} GB ({usage_percent:.1f}%)\n"
-            f"- **Cached:** {cached_gb:.1f} GB\n"
-            f"- **Free:** {free_gb:.1f} GB"
-        )
-    except Exception as e:
-        return f"❌ Error getting GPU info: {str(e)}"
-
-
-def load_voice_presets():
-    """Load the voice presets from the voice_examples directory."""
+def load_engine(model_path, audio_tokenizer_path, device, fp16):
+    global ENGINE
     try:
-        with open("voice_examples/config.json", "r", encoding="utf-8") as f:
-            voice_dict = json.load(f)
-        voice_presets = {k: v["transcript"] for k, v in voice_dict.items()}
-        voice_presets["EMPTY"] = "No reference voice"
-        logger.info(f"Loaded voice presets: {list(voice_presets.keys())}")
-        return voice_presets
-    except FileNotFoundError:
-        logger.warning(
-            "Voice examples config file not found. Using empty voice presets."
-        )
-        return {"EMPTY": "No reference voice"}
-    except Exception as e:
-        logger.error(f"Error loading voice presets: {e}")
-        return {"EMPTY": "No reference voice"}
+        if not model_path: model_path = DEFAULT_MODEL_PATH
+        if not audio_tokenizer_path: audio_tokenizer_path = DEFAULT_AUDIO_TOKENIZER_PATH
 
-
-def get_voice_preset(voice_preset):
-    """Get the voice path and text for a given voice preset."""
-    voice_path = os.path.join("voice_examples", f"{voice_preset}.wav")
-    if not os.path.exists(voice_path):
-        logger.warning(f"Voice preset file not found: {voice_path}")
-        return None, "Voice preset not found"
-
-    text = VOICE_PRESETS.get(voice_preset, "No transcript available")
-    return voice_path, text
-
-
-def normalize_chinese_punctuation(text):
-    """Convert Chinese (full-width) punctuation marks to English (half-width) equivalents."""
-    chinese_to_english_punct = {
-        "，": ", ",
-        "。": ".",
-        "：": ":",
-        "；": ";",
-        "？": "?",
-        "！": "!",
-        "（": "(",
-        "）": ")",
-        "【": "[",
-        "】": "]",
-        "《": "<",
-        "》": ">",
-        "“": '"',
-        "”": '"',
-        "‘": "'",
-        "’": "'",
-        "「": '"',
-        "」": '"',
-        "『": '"',
-        "』": '"',
-        "、": ",",
-        "—": "-",
-        "…": "...",
-        "·": ".",
-        "「": '"',
-        "」": '"',
-        "『": '"',
-        "』": '"',
-    }
-
-    for zh_punct, en_punct in chinese_to_english_punct.items():
-        text = text.replace(zh_punct, en_punct)
-    return text
-
-
-def _extract_stop_strings(stop_strings: Optional[Any]) -> List[str]:
-    """Normalize stop strings into a list of non-empty strings."""
-    if stop_strings is None:
-        return DEFAULT_STOP_STRINGS.copy()
-
-    if isinstance(stop_strings, dict):
-        rows = stop_strings.get("stops", [])
-    elif isinstance(stop_strings, (list, tuple)):
-        rows = stop_strings
-    else:
-        return (
-            [str(stop_strings).strip()]
-            if str(stop_strings).strip()
-            else DEFAULT_STOP_STRINGS.copy()
-        )
-
-    values: List[str] = []
-    if isinstance(rows, dict):
-        rows = rows.get("data", [])
-
-    for row in rows:
-        if isinstance(row, dict):
-            raw = row.get("stops", "")
-        elif isinstance(row, (list, tuple)):
-            raw = row[0] if row else ""
-        else:
-            raw = row
-
-        if isinstance(raw, str):
-            cleaned = raw.strip()
-            if cleaned:
-                values.append(cleaned)
-
-    return values if values else DEFAULT_STOP_STRINGS.copy()
-
-
-def normalize_text(transcript: str):
-    transcript = normalize_chinese_punctuation(transcript)
-    transcript = transcript.replace("(", " ").replace(")", " ")
-    transcript = transcript.replace("°F", " degrees Fahrenheit")
-    transcript = transcript.replace("°C", " degrees Celsius")
-
-    for tag, replacement in [
-        ("[laugh]", "<SE>[Laughter]</SE>"),
-        ("[humming start]", "<SE>[Humming]</SE>"),
-        ("[humming end]", "<SE_e>[Humming]</SE_e>"),
-        ("[music start]", "<SE_s>[Music]</SE_s>"),
-        ("[music end]", "<SE_e>[Music]</SE_e>"),
-        ("[music]", "<SE>[Music]</SE>"),
-        ("[sing start]", "<SE_s>[Singing]</SE_s>"),
-        ("[sing end]", "<SE_e>[Singing]</SE_e>"),
-        ("[applause]", "<SE>[Applause]</SE>"),
-        ("[cheering]", "<SE>[Cheering]</SE>"),
-        ("[cough]", "<SE>[Cough]</SE>"),
-    ]:
-        transcript = transcript.replace(tag, replacement)
-
-    lines = transcript.split("\n")
-    transcript = "\n".join([" ".join(line.split()) for line in lines if line.strip()])
-    transcript = transcript.strip()
-
-    if not any(
-        [
-            transcript.endswith(c)
-            for c in [".", "!", "?", ",", ";", '"', "'", "</SE_e>", "</SE>"]
-        ]
-    ):
-        transcript += "."
-
-    return transcript
-
-
-def load_parameter_preset(preset_name):
-    """Load parameter preset settings."""
-    if preset_name in PARAMETER_PRESETS:
-        preset = PARAMETER_PRESETS[preset_name]
-        return (
-            gr.update(value=preset["temperature"]),
-            gr.update(value=preset["top_p"]),
-            gr.update(value=preset["top_k"]),
-            gr.update(value=preset["max_completion_tokens"]),
-            gr.update(value=preset["ras_win_len"]),
-            gr.update(value=preset["ras_win_max_num_repeat"]),
-            f"✅ '{preset_name.replace('_', ' ').title()}' preset loaded: {preset['description']}",
-        )
-    else:
-        return tuple([gr.update() for _ in range(7)])
-
-
-def reset_to_defaults():
-    """Reset all parameters to default values."""
-    return load_parameter_preset("default")
-
-
-def initialize_engine(
-    model_path: str = DEFAULT_MODEL_PATH,
-    audio_tokenizer_path: str = DEFAULT_AUDIO_TOKENIZER_PATH,
-    tokenizer_path: str = DEFAULT_MODEL_PATH,
-    device: str = None,
-    load_in_8bit: bool = False,
-):
-    """
-    Initialize the HiggsAudio serving engine with optimizations for 16GB VRAM or less.
-
-    Args:
-        model_path: Path to the HiggsAudio model
-        audio_tokenizer_path: Path to the audio tokenizer
-        tokenizer_path: Path to the tokenizer (optional)
-        device: Device to use for inference (auto-detected if None)
-        load_in_8bit: If True, load weights in FP16 and use a smaller KV cache (lower VRAM)
-
-    Returns:
-        Status message and model status display
-    """
-    global engine, is_initialized
-
-    try:
-        # Validate and set default paths if empty
-        if not model_path or model_path.strip() == "":
-            model_path = DEFAULT_MODEL_PATH
-            logger.warning(f"Empty model path provided, using default: {model_path}")
-
-        if not audio_tokenizer_path or audio_tokenizer_path.strip() == "":
-            audio_tokenizer_path = DEFAULT_AUDIO_TOKENIZER_PATH
-            logger.warning(
-                f"Empty audio tokenizer path provided, using default: {audio_tokenizer_path}"
-            )
-
-        # Handle optional tokenizer path
-        if not tokenizer_path or tokenizer_path.strip() == "":
-            tokenizer_path = DEFAULT_MODEL_PATH
-        # Clear GPU cache before loading
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             gc.collect()
-
-        if device is None:
-            device = get_current_device()
-
-        logger.info(
-            f"Initializing HiggsAudio engine (FP16 weights: {load_in_8bit}, "
-            "KV cache tuned for lower VRAM)"
-        )
-
-        # HiggsAudioServeEngine does not expose bitsandbytes 8-bit; use FP16 weights
-        # when the user requests the low-VRAM path. Smaller KV caches still help VRAM.
-        torch_dtype = torch.float16 if load_in_8bit else "auto"
-        if load_in_8bit:
-            kv_cache_lengths = [512, 1024, 2048]
-        else:
-            kv_cache_lengths = [1024, 2048, 4096]
-
-        engine = HiggsAudioServeEngine(
+        dtype = torch.float16 if fp16 else "auto"
+        ENGINE = HiggsAudioServeEngine(
             model_name_or_path=model_path,
             audio_tokenizer_name_or_path=audio_tokenizer_path,
-            tokenizer_name_or_path=tokenizer_path,
-            device=device,
-            torch_dtype=torch_dtype,
-            kv_cache_lengths=kv_cache_lengths,
+            device=device or get_device(),
+            torch_dtype=dtype,
+            kv_cache_lengths=[768, 1024] if fp16 else [1024, 2048]
         )
-
-        is_initialized = True
-
-        # Get memory info after initialization
-        memory_info = get_gpu_memory_info()
-        quantization_info = (
-            " (FP16 weights, smaller KV cache)" if load_in_8bit else " (default precision)"
-        )
-        status_msg = f"✅ Model successfully loaded on {device}{quantization_info}! Ready to generate speech.\n\n{memory_info}"
-        status_display = (
-            "🟢 **Model Status:** Ready - Model loaded and ready for speech generation"
-        )
-
-        logger.info(
-            f"Successfully initialized HiggsAudioServeEngine with model: {model_path}"
-        )
-        return status_msg, status_display
-
+        return f"Model loaded on {device or get_device()} (fp16={fp16})\n{get_gpu_info()}"
     except Exception as e:
-        is_initialized = False
-        engine = None
-        logger.error(f"Failed to initialize engine: {e}")
-        error_msg = f"❌ Error loading model: {str(e)}"
-        status_display = f"🔴 **Model Status:** Error - {str(e)}"
-        return error_msg, status_display
+        ENGINE = None
+        return f"Loading error: {e}"
 
-
-def process_text_output(text_output: str):
-    """Return a clean status message. Raw model text output is noise for TTS and not useful to display."""
-    return "Audio generated successfully."
-
-
-def prepare_chatml_sample(
-    voice_preset: str,
-    text: str,
-    reference_audio: Optional[str] = None,
-    reference_text: Optional[str] = None,
-    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
-):
-    """Prepare a ChatMLSample for the HiggsAudioServeEngine."""
-    messages = []
-
-    # Add system message if provided
-    if len(system_prompt) > 0:
-        messages.append(Message(role="system", content=system_prompt))
-
-    # Add reference audio if provided
-    audio_base64 = None
-    ref_text = ""
-
-    if reference_audio:
-        # Custom reference audio
-        audio_base64 = encode_audio_file(reference_audio)
-        ref_text = reference_text or ""
-    elif voice_preset != "EMPTY":
-        # Voice preset
-        voice_path, ref_text = get_voice_preset(voice_preset)
-        if voice_path is None:
-            logger.warning(
-                f"Voice preset {voice_preset} not found, skipping reference audio"
-            )
-        else:
-            audio_base64 = encode_audio_file(voice_path)
-
-    # Only add reference audio if we have it
-    if audio_base64 is not None:
-        # Add user message with reference text
-        messages.append(Message(role="user", content=ref_text))
-
-        # Add assistant message with audio content
-        audio_content = AudioContent(raw_audio=audio_base64, audio_url="")
-        messages.append(Message(role="assistant", content=[audio_content]))
-
-    # Add the main user message
-    text = normalize_text(text)
-    messages.append(Message(role="user", content=text))
-
-    return ChatMLSample(messages=messages)
-
-
-def text_to_speech(
-    text,
+def tts(
+    input_text,
+    system_prompt,
     voice_preset,
-    reference_audio=None,
-    reference_text=None,
-    max_completion_tokens=None,
-    temperature=None,
-    top_p=None,
-    top_k=None,
-    system_prompt=DEFAULT_SYSTEM_PROMPT,
-    stop_strings=None,
-    ras_win_len=None,
-    ras_win_max_num_repeat=None,
+    reference_audio,
+    reference_text,
+    temperature,
+    top_p,
+    top_k,
+    max_tokens,
+    stops,
 ):
-    """Convert text to speech using HiggsAudioServeEngine."""
-    global engine
-
-    d = DEFAULT_GEN_PARAMS
-    if max_completion_tokens is None:
-        max_completion_tokens = d["max_completion_tokens"]
-    if temperature is None:
-        temperature = d["temperature"]
-    if top_p is None:
-        top_p = d["top_p"]
-    if top_k is None:
-        top_k = d["top_k"]
-    if ras_win_len is None:
-        ras_win_len = d["ras_win_len"]
-    if ras_win_max_num_repeat is None:
-        ras_win_max_num_repeat = d["ras_win_max_num_repeat"]
-
-    if engine is None:
-        init_result = initialize_engine(
-            model_path=DEFAULT_MODEL_PATH,
-            audio_tokenizer_path=DEFAULT_AUDIO_TOKENIZER_PATH,
-            tokenizer_path=DEFAULT_MODEL_PATH,
-            device=None,
-            load_in_8bit=False,
-        )
-        if "Error" in init_result[0]:
-            return init_result[0], None, init_result[1]
-
+    global ENGINE
+    if ENGINE is None:
+        return "Model not loaded!", None
     try:
-        # Prepare ChatML sample
-        chatml_sample = prepare_chatml_sample(
-            voice_preset, text, reference_audio, reference_text, system_prompt
-        )
+        # ChatML-style input
+        messages = []
+        if system_prompt and system_prompt.strip():
+            messages.append(Message(role="system", content=system_prompt.strip()))
+        # Ref audio (preset or custom)
+        ref_audio64, ref_text = None, ""
+        if reference_audio:
+            ref_audio64 = base64_audio(reference_audio)
+            ref_text = reference_text or ""
+        elif voice_preset and voice_preset != "EMPTY":
+            # Try to load a sample .wav from voice_examples/voice_preset.wav
+            preset_path = os.path.join(ROOT, "voice_examples", f"{voice_preset}.wav")
+            if os.path.exists(preset_path):
+                ref_audio64 = base64_audio(preset_path)
+                ref_text = VOICE_PRESETS.get(voice_preset, "")
+        if ref_audio64:
+            messages.append(Message(role="user", content=ref_text))
+            messages.append(Message(role="assistant", content=[AudioContent(raw_audio=ref_audio64, audio_url="")]))
+        # Main content
+        messages.append(Message(role="user", content=normalize_text(input_text)))
+        chatml = ChatMLSample(messages=messages)
 
-        # Convert stop strings format
-        stop_list = _extract_stop_strings(stop_strings)
+        params = {
+            "chat_ml_sample": chatml,
+            "max_new_tokens": int(max_tokens),
+            "temperature": float(temperature),
+            "top_p": float(top_p),
+            "top_k": int(top_k) if int(top_k) > 0 else None,
+            "stop_strings": stop_strings_from_table(stops)
+        }
+        t0 = time.time()
+        out = ENGINE.generate(**params)
+        t1 = time.time()
 
-        request_id = f"tts-enhanced-{str(uuid.uuid4())}"
-        logger.info(
-            f"{request_id}: Generating speech for text: {text[:100]}..., \n"
-            f"with parameters: temperature={temperature}, top_p={top_p}, top_k={top_k}, stop_list={stop_list}, "
-            f"ras_win_len={ras_win_len}, ras_win_max_num_repeat={ras_win_max_num_repeat}"
-        )
-        start_time = time.time()
-
-        # Generate using the engine
-        response = engine.generate(
-            chat_ml_sample=chatml_sample,
-            max_new_tokens=max_completion_tokens,
-            temperature=temperature,
-            top_k=top_k if top_k > 0 else None,
-            top_p=top_p,
-            stop_strings=stop_list,
-            ras_win_len=ras_win_len if ras_win_len > 0 else None,
-            ras_win_max_num_repeat=ras_win_max_num_repeat,
-        )
-
-        generation_time = time.time() - start_time
-        logger.info(f"{request_id}: Generated audio in {generation_time:.3f} seconds")
-
-        # Process the response
-        text_output = process_text_output(response.generated_text)
-
-        if response.audio is not None:
-            # Save the generated audio to a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-                sf.write(tmp_file.name, response.audio, response.sampling_rate)
-
-                return (
-                    f"✅ {text_output}\n\nGenerated in {generation_time:.3f}s",
-                    tmp_file.name,
-                    "🟢 **Model Status:** Ready - Model loaded and ready for speech generation",
-                )
+        if hasattr(out, "audio") and out.audio is not None:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tf:
+                sf.write(tf.name, out.audio, out.sampling_rate)
+            msg = f"Success. Took {t1-t0:.2f}s"
+            return msg, tf.name
         else:
-            logger.warning("No audio generated")
-            return (
-                f"⚠️ {text_output}\n\nNo audio generated",
-                None,
-                "🟢 **Model Status:** Ready - Model loaded and ready for speech generation",
-            )
-
+            return "No audio generated.", None
     except Exception as e:
-        error_msg = f"Error generating speech: {e}"
-        logger.error(error_msg)
-        return f"❌ {error_msg}", None, f"🔴 **Model Status:** Error - {str(e)}"
+        return f"Error: {e}", None
 
+# --- Gradio Interface ---
 
-def create_gradio_interface():
-    """Create the enhanced Gradio interface for HiggsAudio with all advanced features."""
+def gradio_ui():
+    # Preset loading
+    def set_example(name):
+        d = EXAMPLES[name]
+        return d["system_prompt"], d["input_text"]
 
-    # Load theme and voice presets
-    try:
-        my_theme = gr.Theme.load("theme.json")
-    except:
-        my_theme = gr.themes.Default()
+    def set_params(name):
+        d = PARAM_PRESETS[name]
+        return d["temperature"], d["top_p"], d["top_k"], d["max_tokens"]
 
-    global VOICE_PRESETS
-    VOICE_PRESETS = load_voice_presets()
+    with gr.Blocks(title="HiggsAudio Minimal Interface") as demo:
+        gr.Markdown("## HiggsAudio Text-to-Speech")
+        model_status = gr.Markdown("Status: Not loaded")
+        # Model config
+        with gr.Accordion("Model Config", open=False):
+            mpath = gr.Textbox(label="Model path", value=DEFAULT_MODEL_PATH)
+            apath = gr.Textbox(label="Audio tokenizer path", value=DEFAULT_AUDIO_TOKENIZER_PATH)
+            devsel = gr.Radio(["cuda", "cpu"], value=get_device(), label="Device")
+            fp16box = gr.Checkbox(label="FP16/low VRAM", value=False)
+            init_btn = gr.Button("Initialize Model")
+            gpuinfo_btn = gr.Button("Show GPU Info")
+            model_msg = gr.Textbox(interactive=False)
 
-    # Custom CSS to disable focus highlighting
-    custom_css = """
-    .gradio-container input:focus, 
-    .gradio-container textarea:focus, 
-    .gradio-container select:focus,
-    .gradio-container .gr-input:focus,
-    .gradio-container .gr-textarea:focus,
-    .gradio-container .gr-textbox:focus,
-    .gradio-container .gr-textbox:focus-within,
-    .gradio-container .gr-form:focus-within,
-    .gradio-container *:focus {
-        box-shadow: none !important;
-        border-color: var(--border-color-primary) !important;
-        outline: none !important;
-        background-color: var(--input-background-fill) !important;
-    }
-    """
+        # Prompt and params
+        example_drop = gr.Dropdown(list(EXAMPLES.keys()), value="Simple", label="Prompt Example")
+        preset_drop = gr.Dropdown(list(PARAM_PRESETS.keys()), value="default", label="Parameter Preset")
+        sys_prompt = gr.TextArea(label="System Prompt", value=EXAMPLES["Simple"]["system_prompt"], lines=2)
+        txt_input = gr.TextArea(label="Input Text", value=EXAMPLES["Simple"]["input_text"], lines=3)
+        voice_preset_drop = gr.Dropdown(list(VOICE_PRESETS.keys()), value="EMPTY", label="Voice Preset")
+        ref_audio = gr.Audio(label="Reference Audio", type="filepath")
+        ref_text = gr.TextArea(label="Reference Transcript", lines=2)
+        temperature = gr.Slider(0., 1.5, value=PARAM_PRESETS["default"]["temperature"], label="Temperature")
+        top_p = gr.Slider(0.1, 1.0, value=PARAM_PRESETS["default"]["top_p"], label="Top P")
+        top_k = gr.Slider(-1, 100, value=PARAM_PRESETS["default"]["top_k"], step=1, label="Top K")
+        max_tokens = gr.Slider(64, 4096, value=PARAM_PRESETS["default"]["max_tokens"], step=8, label="Max Tokens")
+        stops = gr.Dataframe(headers=["stop"], value=[[s] for s in DEFAULT_STOP_STRINGS], col_count=(1, "fixed"))
 
-    default_template = "smart-voice"
+        out_msg = gr.Textbox(label="Status", interactive=False)
+        out_audio = gr.Audio(label="Output Audio", interactive=False)
+        gen_btn = gr.Button("Generate Speech")
 
-    with gr.Blocks(
-        theme=my_theme, css=custom_css, title="HiggsAudio Enhanced Interface"
-    ) as interface:
-        gr.Markdown("# HiggsAudio V2 Enhanced Text-to-Speech Interface")
-        gr.Markdown(
-            "Generate expressive `24kHz` audio with chat-style prompting, optional reference-audio voice cloning, multi-speaker dialogue tags, and lower-VRAM FP16 loading."
+        # Bindings
+        example_drop.change(set_example, inputs=example_drop, outputs=[sys_prompt, txt_input])
+        preset_drop.change(set_params, inputs=preset_drop, outputs=[temperature, top_p, top_k, max_tokens])
+        init_btn.click(
+            fn=lambda m, a, d, f: load_engine(m, a, d, f),
+            inputs=[mpath, apath, devsel, fp16box],
+            outputs=model_msg
         )
-        with gr.Accordion("How HiggsAudio Works", open=False):
-            gr.Markdown(
-                """
-                HiggsAudio V2 is an audio generation model built around an LLM-style generation stack.
-
-                - It reads a chat-like prompt made of `system`, `scene`, and `user` messages.
-                - For zero-shot voice cloning, you can provide a short reference clip plus its transcript.
-                - For dialogue, speaker tags like `[SPEAKER0]` and `[SPEAKER1]` help the model keep roles separate.
-                - Boson AI says the model was pretrained on more than `10M` hours of automatically annotated audio data.
-                - The published architecture highlights a unified audio tokenizer plus a `DualFFN` design so the model can handle both text and acoustic tokens efficiently.
-                - Generated tokens are decoded into waveform audio at `24kHz`.
-                """
-            )
-
-        # Model status indicator
-        model_status_display = gr.Markdown(
-            "🔴 **Model Status:** Not initialized - Click 'Initialize' below to start"
+        gpuinfo_btn.click(fn=get_gpu_info, outputs=model_msg)
+        gen_btn.click(
+            fn=tts,
+            inputs=[txt_input, sys_prompt, voice_preset_drop, ref_audio, ref_text,
+                    temperature, top_p, top_k, max_tokens, stops],
+            outputs=[out_msg, out_audio]
         )
 
-        with gr.Row():
-            with gr.Column(scale=2):
-                # Template selection dropdown
-                template_dropdown = gr.Dropdown(
-                    label="TTS Template",
-                    choices=list(PREDEFINED_EXAMPLES.keys()),
-                    value=default_template,
-                    info="Select a predefined example for system and input messages.",
-                )
+    return demo
 
-                # Template description display
-                template_description = gr.HTML(
-                    value=f'<p style="font-size: 0.85em; color: var(--body-text-color-subdued); margin: 0; padding: 0;"> {PREDEFINED_EXAMPLES[default_template]["description"]}</p>',
-                    visible=True,
-                )
-
-                system_prompt = gr.TextArea(
-                    label="System Prompt",
-                    placeholder="Enter system prompt to guide the model...",
-                    value=PREDEFINED_EXAMPLES[default_template]["system_prompt"],
-                    lines=3,
-                )
-
-                input_text = gr.TextArea(
-                    label="Input Text",
-                    placeholder="Type the text you want to convert to speech...",
-                    value=PREDEFINED_EXAMPLES[default_template]["input_text"],
-                    lines=5,
-                )
-
-                voice_preset = gr.Dropdown(
-                    label="Voice Preset",
-                    choices=list(VOICE_PRESETS.keys()),
-                    value="EMPTY",
-                    interactive=False,
-                    visible=False,
-                )
-
-                with gr.Accordion(
-                    "Custom Reference (Optional)", open=False, visible=False
-                ) as custom_reference_accordion:
-                    reference_audio = gr.Audio(label="Reference Audio", type="filepath")
-                    reference_text = gr.TextArea(
-                        label="Reference Text (transcript of the reference audio)",
-                        placeholder="Enter the transcript of your reference audio...",
-                        lines=3,
-                    )
-
-                with gr.Accordion("Advanced Parameters", open=False):
-                    gr.Markdown(
-                        "Lower `temperature`, `top_p`, and `top_k` usually reduce audio hallucinations. Start with `Default` or `Faithful TTS` if you want the model to stick closely to the script."
-                    )
-                    max_completion_tokens = gr.Slider(
-                        minimum=128,
-                        maximum=4096,
-                        value=DEFAULT_GEN_PARAMS["max_completion_tokens"],
-                        step=10,
-                        label="Max Completion Tokens",
-                    )
-                    temperature = gr.Slider(
-                        minimum=0.0,
-                        maximum=1.5,
-                        value=DEFAULT_GEN_PARAMS["temperature"],
-                        step=0.1,
-                        label="Temperature",
-                    )
-                    top_p = gr.Slider(
-                        minimum=0.1,
-                        maximum=1.0,
-                        value=DEFAULT_GEN_PARAMS["top_p"],
-                        step=0.05,
-                        label="Top P",
-                    )
-                    top_k = gr.Slider(
-                        minimum=-1,
-                        maximum=100,
-                        value=DEFAULT_GEN_PARAMS["top_k"],
-                        step=1,
-                        label="Top K",
-                    )
-                    ras_win_len = gr.Slider(
-                        minimum=0,
-                        maximum=10,
-                        value=DEFAULT_GEN_PARAMS["ras_win_len"],
-                        step=1,
-                        label="RAS Window Length",
-                        info="Window length for repetition avoidance sampling",
-                    )
-                    ras_win_max_num_repeat = gr.Slider(
-                        minimum=1,
-                        maximum=10,
-                        value=DEFAULT_GEN_PARAMS["ras_win_max_num_repeat"],
-                        step=1,
-                        label="RAS Max Num Repeat",
-                        info="Maximum number of repetitions allowed in the window",
-                    )
-                    # Add stop strings component
-                    stop_strings = gr.Dataframe(
-                        label="Stop Strings",
-                        headers=["stops"],
-                        datatype=["str"],
-                        value=[[s] for s in DEFAULT_STOP_STRINGS],
-                        interactive=True,
-                        col_count=(1, "fixed"),
-                    )
-
-                    # Parameter presets section
-                    with gr.Row():
-                        parameter_preset_dropdown = gr.Dropdown(
-                            choices=[
-                                ("Default - Balanced quality and speed", "default"),
-                                (
-                                    "Female Voice - Optimized for female speech",
-                                    "female_voice",
-                                ),
-                                (
-                                    "Male Voice - Optimized for male speech",
-                                    "male_voice",
-                                ),
-                                (
-                                    "High Quality - Conservative settings for best quality",
-                                    "high_quality",
-                                ),
-                                (
-                                    "Faithful TTS - Lowest hallucination risk",
-                                    "faithful_tts",
-                                ),
-                                (
-                                    "Creative - More expressive and varied output",
-                                    "creative",
-                                ),
-                                ("Fast - Quick generation with shorter output", "fast"),
-                            ],
-                            value="default",
-                            label="Parameter Presets",
-                            info="Choose preset parameter configurations",
-                        )
-                        load_param_preset_btn = gr.Button(
-                            "📋 Load Parameters", variant="secondary"
-                        )
-
-                    reset_defaults_btn = gr.Button(
-                        "🔄 Reset All to Defaults", variant="secondary"
-                    )
-
-                generate_btn = gr.Button("Generate Speech", variant="primary")
-
-            with gr.Column(scale=2):
-                output_text = gr.TextArea(label="Generation Status", lines=3)
-                output_audio = gr.Audio(
-                    label="Generated Audio", interactive=False, autoplay=True
-                )
-                preset_status_display = gr.Textbox(
-                    label="Parameter Status",
-                    interactive=False,
-                    placeholder="Parameter presets can be loaded from Advanced Settings",
-                )
-
-        # Voice samples section
-        with gr.Row(visible=False) as voice_samples_section:
-            voice_samples_table = gr.Dataframe(
-                headers=["Voice Preset", "Sample Text"],
-                datatype=["str", "str"],
-                value=[
-                    [preset, text]
-                    for preset, text in VOICE_PRESETS.items()
-                    if preset != "EMPTY"
-                ],
-                interactive=False,
-            )
-            sample_audio = gr.Audio(label="Voice Sample")
-
-        # Model initialization (optional FP16 weights + smaller KV cache for lower VRAM)
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("### 🚀 Model Setup & Configuration")
-                gr.Markdown(
-                    "*Load the local HiggsAudio model and tokenizer, then generate from prompts, tags, and optional reference audio. First-time setup may take 5-10 minutes.*"
-                )
-
-                # Model configuration section
-                with gr.Accordion("🔧 Model Configuration", open=False):
-                    model_path = gr.Textbox(
-                        label="Model Path",
-                        placeholder="Enter model name or path",
-                        value=DEFAULT_MODEL_PATH,
-                        info="Path to the HiggsAudio model (Pinokio: models/higgs-audio-v2-generation-3B-base)",
-                    )
-
-                    audio_tokenizer_path = gr.Textbox(
-                        label="Audio Tokenizer Path",
-                        placeholder="Enter audio tokenizer name or path",
-                        value=DEFAULT_AUDIO_TOKENIZER_PATH,
-                        info="Path to the audio tokenizer (Pinokio: models/higgs-audio-v2-tokenizer)",
-                    )
-
-                    tokenizer_path = gr.Textbox(
-                        label="Tokenizer Path (Optional)",
-                        placeholder="Leave empty to use model path",
-                        info="Optional separate tokenizer path",
-                    )
-
-                    device = gr.Dropdown(
-                        choices=["cuda", "cpu"],
-                        value="cuda" if torch.cuda.is_available() else "cpu",
-                        label="Device",
-                        info="Device to use for inference",
-                    )
-
-                with gr.Accordion("⚙️ Model Loading Options", open=True):
-                    gr.Markdown("**🚀 Model Loading Configuration:**")
-                    gr.Markdown(
-                        "• **FP16 weights + smaller KV cache**: lower VRAM than full precision; "
-                        "recommended if you are tight on memory"
-                    )
-                    gr.Markdown(
-                        "• **Memory Info**: Check current VRAM usage before loading"
-                    )
-
-                    load_in_8bit_checkbox = gr.Checkbox(
-                        label="Load in FP16 (lower VRAM)",
-                        value=False,
-                        info="Uses half-precision weights and a smaller KV cache. Not the same as bitsandbytes 8-bit.",
-                    )
-
-                    with gr.Row():
-                        reload_model_btn = gr.Button(
-                            "🔄 Load/Reload Model", variant="primary"
-                        )
-                        memory_info_btn = gr.Button(
-                            "📊 Check GPU Memory", variant="secondary"
-                        )
-
-                    gr.Markdown(
-                        """
-                        **FP16 / low-VRAM mode:**
-                        - Loads weights in float16 instead of the default dtype
-                        - Uses smaller KV-cache sizes to save additional VRAM
-                        - Useful on 16GB GPUs or when the default load runs out of memory
-                        """
-                    )
-
-                init_status = gr.Textbox(
-                    label="Status",
-                    interactive=False,
-                    placeholder="Click 'Load/Reload Model' to initialize the model...",
-                )
-                memory_status = gr.Markdown(
-                    "Click 'Check GPU Memory' to see current VRAM usage"
-                )
-
-        # Event handlers
-        def play_voice_sample(evt: gr.SelectData):
-            try:
-                preset_names = [
-                    preset for preset in VOICE_PRESETS.keys() if preset != "EMPTY"
-                ]
-                if evt.index[0] < len(preset_names):
-                    preset = preset_names[evt.index[0]]
-                    voice_path, _ = get_voice_preset(preset)
-                    if voice_path and os.path.exists(voice_path):
-                        return voice_path
-                    else:
-                        gr.Warning(f"Voice sample file not found for preset: {preset}")
-                        return None
-                else:
-                    gr.Warning("Invalid voice preset selection")
-                    return None
-            except Exception as e:
-                logger.error(f"Error playing voice sample: {e}")
-                gr.Error(f"Error playing voice sample: {e}")
-                return None
-
-        def apply_template(template_name):
-            if template_name in PREDEFINED_EXAMPLES:
-                template = PREDEFINED_EXAMPLES[template_name]
-                is_voice_clone = template_name == "voice-clone"
-                voice_preset_value = "belinda" if is_voice_clone else "EMPTY"
-                ras_win_len_value = 0 if template_name == "single-speaker-bgm" else 7
-                description_text = f'<p style="font-size: 0.85em; color: var(--body-text-color-subdued); margin: 0; padding: 0;"> {template["description"]}</p>'
-                return (
-                    template["system_prompt"],
-                    template["input_text"],
-                    description_text,
-                    gr.update(
-                        value=voice_preset_value,
-                        interactive=is_voice_clone,
-                        visible=is_voice_clone,
-                    ),
-                    gr.update(visible=is_voice_clone),
-                    gr.update(visible=is_voice_clone),
-                    ras_win_len_value,
-                )
-            else:
-                return tuple([gr.update() for _ in range(7)])
-
-        # Connect event handlers
-        voice_samples_table.select(fn=play_voice_sample, outputs=[sample_audio])
-
-        template_dropdown.change(
-            fn=apply_template,
-            inputs=[template_dropdown],
-            outputs=[
-                system_prompt,
-                input_text,
-                template_description,
-                voice_preset,
-                custom_reference_accordion,
-                voice_samples_section,
-                ras_win_len,
-            ],
-        )
-
-        generate_btn.click(
-            fn=text_to_speech,
-            inputs=[
-                input_text,
-                voice_preset,
-                reference_audio,
-                reference_text,
-                max_completion_tokens,
-                temperature,
-                top_p,
-                top_k,
-                system_prompt,
-                stop_strings,
-                ras_win_len,
-                ras_win_max_num_repeat,
-            ],
-            outputs=[output_text, output_audio, model_status_display],
-        )
-
-        # Model reload button with FP16 / low-VRAM checkbox
-        reload_model_btn.click(
-            fn=initialize_engine,
-            inputs=[
-                model_path,
-                audio_tokenizer_path,
-                tokenizer_path,
-                device,
-                load_in_8bit_checkbox,
-            ],
-            outputs=[init_status, model_status_display],
-        )
-
-        memory_info_btn.click(fn=get_gpu_memory_info, outputs=[memory_status])
-
-        # Parameter preset event handlers
-        load_param_preset_btn.click(
-            fn=load_parameter_preset,
-            inputs=[parameter_preset_dropdown],
-            outputs=[
-                temperature,
-                top_p,
-                top_k,
-                max_completion_tokens,
-                ras_win_len,
-                ras_win_max_num_repeat,
-                preset_status_display,
-            ],
-        )
-
-        reset_defaults_btn.click(
-            fn=reset_to_defaults,
-            outputs=[
-                temperature,
-                top_p,
-                top_k,
-                max_completion_tokens,
-                ras_win_len,
-                ras_win_max_num_repeat,
-                preset_status_display,
-            ],
-        )
-
-    return interface
-
+# --- Main Entrypoint ---
 
 if __name__ == "__main__":
-    # Set up logging
-    logging.basicConfig(level=logging.INFO)
-
-    # Parse command line arguments for enhanced functionality
-    parser = argparse.ArgumentParser(description="Enhanced HiggsAudio V2 Gradio Interface")
-    parser.add_argument("--host", default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"), help="Host to bind to (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("GRADIO_SERVER_PORT", "7860")), help="Port to bind to (default: 7860)")
-    parser.add_argument("--share", action="store_true", help="Enable public sharing via Gradio")
-
+    parser = argparse.ArgumentParser(description="Minimal HiggsAudio Gradio UI")
+    parser.add_argument("--host", default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("GRADIO_SERVER_PORT", "7860")))
+    parser.add_argument("--share", action="store_true")
     args = parser.parse_args()
 
-    print(f"Starting Enhanced HiggsAudio V2 interface on {args.host}:{args.port}")
-    if args.share:
-        print("Public sharing enabled via Gradio")
-    else:
-        print("Local access only")
+    # Load voice presets if available
+    presets_config = os.path.join(ROOT, "voice_examples", "config.json")
+    if os.path.exists(presets_config):
+        try:
+            with open(presets_config, "r", encoding="utf-8") as f:
+                cfgd = json.load(f)
+            VOICE_PRESETS = {k: v["transcript"] for k, v in cfgd.items()}
+            VOICE_PRESETS["EMPTY"] = "No reference"
+        except Exception as e:
+            logger.error(f"Failed to load voice presets: {e}")
 
-    # Create and launch the interface
-    interface = create_gradio_interface()
-    interface.launch(server_name=args.host, server_port=args.port, share=args.share)
+    print(f"Launching HiggsAudio UI on {args.host}:{args.port} (share={args.share})")
+    ui = gradio_ui()
+    ui.launch(server_name=args.host, server_port=args.port, share=args.share)
