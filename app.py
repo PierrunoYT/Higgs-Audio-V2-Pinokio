@@ -42,9 +42,15 @@ from higgs_audio.data_types import ChatMLSample, AudioContent, Message
 engine = None
 
 # Default model configuration
+ROOT = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MODEL_PATH = "bosonai/higgs-audio-v2-generation-3B-base"
 DEFAULT_AUDIO_TOKENIZER_PATH = "bosonai/higgs-audio-v2-tokenizer"
+LOCAL_MODEL_PATH = os.path.join(ROOT, "models", "higgs-audio-v2-generation-3B-base")
+LOCAL_AUDIO_TOKENIZER_PATH = os.path.join(ROOT, "models", "higgs-audio-v2-tokenizer")
 SAMPLE_RATE = 24000
+VOICE_PRESET_SPACE_REPO = "smola/higgs_audio_v2"
+VOICE_PRESET_DIR = "voice_examples"
+TEMP_HIGGS_VOICE_DIR = os.path.join(ROOT, "temp_higgs", "voice_examples")
 
 DEFAULT_SYSTEM_PROMPT = (
     "Generate audio following instruction.\n\n"
@@ -124,20 +130,51 @@ def get_current_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def load_voice_presets():
-    """Load the voice presets from the voice_examples directory."""
+def resolve_model_and_tokenizer_paths():
+    """Prefer locally downloaded artifacts, fallback to HF repo IDs."""
+    model_path = LOCAL_MODEL_PATH if os.path.exists(LOCAL_MODEL_PATH) else DEFAULT_MODEL_PATH
+    tokenizer_path = LOCAL_AUDIO_TOKENIZER_PATH if os.path.exists(LOCAL_AUDIO_TOKENIZER_PATH) else DEFAULT_AUDIO_TOKENIZER_PATH
+    return model_path, tokenizer_path
+
+
+def _download_voice_preset_file(filename: str):
+    """Resolve a voice preset file from local temp_higgs first, then HF."""
+    local_path = os.path.join(TEMP_HIGGS_VOICE_DIR, filename)
+    if os.path.exists(local_path):
+        return local_path
+
     try:
-        with open(
-            os.path.join(os.path.dirname(__file__), "voice_examples", "config.json"),
-            "r",
-        ) as f:
+        from huggingface_hub import hf_hub_download
+    except Exception as e:
+        logger.warning(f"huggingface_hub not available for voice presets: {e}")
+        return None
+
+    rel_path = f"{VOICE_PRESET_DIR}/{filename}"
+    try:
+        return hf_hub_download(
+            repo_id=VOICE_PRESET_SPACE_REPO,
+            repo_type="space",
+            filename=rel_path,
+        )
+    except Exception as e:
+        logger.warning(f"Failed downloading {rel_path} from {VOICE_PRESET_SPACE_REPO}: {e}")
+        return None
+
+
+def load_voice_presets():
+    """Load voice presets from Hugging Face Space assets."""
+    try:
+        cfg_path = _download_voice_preset_file("config.json")
+        if not cfg_path:
+            raise FileNotFoundError("Unable to download voice_examples/config.json from HF")
+        with open(cfg_path, "r", encoding="utf-8") as f:
             voice_dict = json.load(f)
         voice_presets = {k: v["transcript"] for k, v in voice_dict.items()}
         voice_presets["EMPTY"] = "No reference voice"
         logger.info(f"Loaded voice presets: {list(voice_presets.keys())}")
         return voice_presets
     except FileNotFoundError:
-        logger.warning("Voice examples config file not found. Using empty voice presets.")
+        logger.warning("Voice presets config not found on HF. Using empty voice presets.")
         return {"EMPTY": "No reference voice"}
     except Exception as e:
         logger.error(f"Error loading voice presets: {e}")
@@ -145,10 +182,10 @@ def load_voice_presets():
 
 
 def get_voice_preset(voice_preset):
-    """Get the voice path and text for a given voice preset."""
-    voice_path = os.path.join(os.path.dirname(__file__), "voice_examples", f"{voice_preset}.wav")
-    if not os.path.exists(voice_path):
-        logger.warning(f"Voice preset file not found: {voice_path}")
+    """Get cached voice wav path + transcript for a given voice preset."""
+    voice_path = _download_voice_preset_file(f"{voice_preset}.wav")
+    if not voice_path or not os.path.exists(voice_path):
+        logger.warning(f"Voice preset file not found on HF: {voice_preset}.wav")
         return None, "Voice preset not found"
 
     text = VOICE_PRESETS.get(voice_preset, "No transcript available")
@@ -266,6 +303,29 @@ def process_text_output(text_output: str):
     return text_output
 
 
+def extract_stop_strings(stop_strings):
+    """Parse stop strings from Gradio dataframe payloads robustly."""
+    if stop_strings is None:
+        return DEFAULT_STOP_STRINGS
+    try:
+        if isinstance(stop_strings, dict) and "stops" in stop_strings:
+            values = stop_strings["stops"]
+        elif hasattr(stop_strings, "columns") and hasattr(stop_strings, "values"):
+            if "stops" in list(stop_strings.columns):
+                values = stop_strings["stops"].tolist()
+            else:
+                values = [row[0] for row in stop_strings.values.tolist() if row]
+        elif isinstance(stop_strings, list):
+            values = [row[0] if isinstance(row, (list, tuple)) and row else row for row in stop_strings]
+        else:
+            values = []
+
+        cleaned = [str(v).strip() for v in values if v is not None and str(v).strip()]
+        return cleaned if cleaned else DEFAULT_STOP_STRINGS
+    except Exception:
+        return DEFAULT_STOP_STRINGS
+
+
 def prepare_chatml_sample(
     voice_preset: str,
     text: str,
@@ -350,17 +410,15 @@ def text_to_speech(
     global engine
 
     if engine is None:
-        initialize_engine(DEFAULT_MODEL_PATH, DEFAULT_AUDIO_TOKENIZER_PATH)
+        model_path, tokenizer_path = resolve_model_and_tokenizer_paths()
+        initialize_engine(model_path, tokenizer_path)
 
     try:
         # Prepare ChatML sample
         chatml_sample = prepare_chatml_sample(voice_preset, text, reference_audio, reference_text, system_prompt)
 
         # Convert stop strings format
-        if stop_strings is None:
-            stop_list = DEFAULT_STOP_STRINGS
-        else:
-            stop_list = [s for s in stop_strings["stops"] if s.strip()]
+        stop_list = extract_stop_strings(stop_strings)
 
         request_id = f"tts-playground-{str(uuid.uuid4())}"
         logger.info(
