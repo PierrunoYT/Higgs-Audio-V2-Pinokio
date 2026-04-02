@@ -116,32 +116,36 @@ def normalize_text(txt: str) -> str:
     return txt.strip() if txt else ""
 
 def stop_strings_from_table(stops: Any) -> List[str]:
-    # Handles both pandas.DataFrame and list input, avoiding ambiguous truth value error.
+    # Handles both pandas.DataFrame and list-like inputs without ambiguous truthiness.
     import pandas as pd
 
-    # Handle case where stops is a pandas.DataFrame from Gradio Dataframe component
-    if hasattr(stops, "values") and hasattr(stops, "columns"):
-        try:
-            stops_list = stops.values.tolist()
-        except Exception:
-            stops_list = []
-    else:
-        stops_list = stops
-
-    # If stops_list is a DataFrame and is empty, just return default
-    if stops_list is None:
+    if stops is None:
         return DEFAULT_STOP_STRINGS
 
     try:
-        flat = []
-        for row in stops_list:
-            # Row can be a list/tuple or just a string
-            if isinstance(row, (list, tuple)):
-                v = row[0] if row else ""
-            else:
-                v = row
-            if v and isinstance(v, str) and v.strip():
-                flat.append(v.strip())
+        # Gradio Dataframe can provide a pandas.DataFrame.
+        if isinstance(stops, pd.DataFrame):
+            if stops.empty:
+                return DEFAULT_STOP_STRINGS
+            rows = stops.values.tolist()
+        else:
+            rows = stops
+
+        flat: List[str] = []
+        for row in rows:
+            value = row[0] if isinstance(row, (list, tuple)) and len(row) > 0 else row
+
+            if value is None:
+                continue
+            if isinstance(value, str):
+                text = value.strip()
+                if text:
+                    flat.append(text)
+            elif pd.notna(value):
+                text = str(value).strip()
+                if text:
+                    flat.append(text)
+
         return flat if flat else DEFAULT_STOP_STRINGS
     except Exception as e:
         logger.warning(f"stop_strings_from_table: fallback due to: {e}")
