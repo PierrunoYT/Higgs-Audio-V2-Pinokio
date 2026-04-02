@@ -236,7 +236,7 @@ def normalize_chinese_punctuation(text):
         "…": "...", "·": ".", "「": '"', "」": '"', "『": '"', "』": '"',
     }
     
-        for zh_punct, en_punct in chinese_to_english_punct.items():
+    for zh_punct, en_punct in chinese_to_english_punct.items():
         text = text.replace(zh_punct, en_punct)
     return text
 
