@@ -34,9 +34,13 @@ except Exception:
 
     spaces = _SpacesFallback()
 
-# Import HiggsAudio components
-from higgs_audio.serve.serve_engine import HiggsAudioServeEngine
-from higgs_audio.data_types import ChatMLSample, AudioContent, Message
+# Import HiggsAudio components (support both package layouts)
+try:
+    from higgs_audio.serve.serve_engine import HiggsAudioServeEngine
+    from higgs_audio.data_types import ChatMLSample, AudioContent, Message
+except ImportError:
+    from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine
+    from boson_multimodal.data_types import ChatMLSample, AudioContent, Message
 
 # Global engine instance
 engine = None
