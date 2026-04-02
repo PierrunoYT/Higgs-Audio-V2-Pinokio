@@ -96,22 +96,36 @@ def normalize_text(txt: str) -> str:
     return txt.strip() if txt else ""
 
 def stop_strings_from_table(stops: Any) -> List[str]:
-    if not stops:
+    # Handles both pandas.DataFrame and list input, avoiding ambiguous truth value error.
+    import pandas as pd
+
+    # Handle case where stops is a pandas.DataFrame from Gradio Dataframe component
+    if hasattr(stops, "values") and hasattr(stops, "columns"):
+        try:
+            stops_list = stops.values.tolist()
+        except Exception:
+            stops_list = []
+    else:
+        stops_list = stops
+
+    # If stops_list is a DataFrame and is empty, just return default
+    if stops_list is None:
         return DEFAULT_STOP_STRINGS
+
     try:
-        if isinstance(stops, list):
-            flat = []
-            for row in stops:
-                if isinstance(row, (list, tuple)):
-                    v = row[0] if row else ""
-                else:
-                    v = row
-                if v and isinstance(v, str) and v.strip():
-                    flat.append(v.strip())
-            return flat if flat else DEFAULT_STOP_STRINGS
-    except Exception:
-        pass
-    return DEFAULT_STOP_STRINGS
+        flat = []
+        for row in stops_list:
+            # Row can be a list/tuple or just a string
+            if isinstance(row, (list, tuple)):
+                v = row[0] if row else ""
+            else:
+                v = row
+            if v and isinstance(v, str) and v.strip():
+                flat.append(v.strip())
+        return flat if flat else DEFAULT_STOP_STRINGS
+    except Exception as e:
+        logger.warning(f"stop_strings_from_table: fallback due to: {e}")
+        return DEFAULT_STOP_STRINGS
 
 # --- Model Initialization & TTS ---
 
