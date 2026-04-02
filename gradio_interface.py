@@ -1,6 +1,8 @@
 """
-Completely rewritten: Minimal, clean Gradio interface for HiggsAudio model serving.
-Focus: Modular, extensible, robust, and straightforward UI for text-to-speech with cloning.
+Minimal, clean Gradio interface for HiggsAudio V2 model serving.
+Focused on the main public HiggsAudio workflows from the GitHub repo and
+Hugging Face model card: text-to-speech, zero-shot voice cloning,
+multi-speaker dialogue, and lower-VRAM local loading.
 """
 
 import gradio as gr
@@ -43,13 +45,31 @@ SAMPLE_RATE = 24000
 EXAMPLES = {
     "Simple": {
         "system_prompt": DEFAULT_SYSTEM_PROMPT,
-        "input_text": "The road not taken by Robert Frost.",
-        "desc": "Simple single-speaker TTS."
+        "input_text": "The sun rises in the east and sets in the west. This simple fact has been observed by humans for thousands of years.",
+        "desc": "Single-speaker smart voice generation without a reference clip."
     },
     "Clone": {
         "system_prompt": "",
-        "input_text": "Say something in the style of the sample clip.",
-        "desc": "Voice cloning via reference audio."
+        "input_text": "The sun rises in the east and sets in the west. This simple fact has been observed by humans for thousands of years.",
+        "desc": "Zero-shot voice cloning with reference audio plus transcript."
+    },
+    "Dialogue": {
+        "system_prompt": (
+            "You are an AI assistant designed to convert text into speech.\n"
+            "If the user's message includes a [SPEAKER*] tag, do not read out the tag and generate speech for the following text, using the specified voice.\n"
+            "If no speaker tag is present, select a suitable voice on your own.\n"
+            "<|scene_desc_start|>\n"
+            "SPEAKER0: feminine\n"
+            "SPEAKER1: masculine\n"
+            "<|scene_desc_end|>"
+        ),
+        "input_text": (
+            "[SPEAKER0] I can't believe you did that without even asking me first!\n"
+            "[SPEAKER1] Oh, come on! It wasn't a big deal, and I knew you would overreact like this.\n"
+            "[SPEAKER0] Overreact? You made a decision that affects both of us without even considering my opinion!\n"
+            "[SPEAKER1] Because I didn't have time to sit around waiting for you to make up your mind! Someone had to act."
+        ),
+        "desc": "Multi-speaker dialogue generation using speaker tags and scene instructions."
     },
 }
 PARAM_PRESETS = {
@@ -58,14 +78,14 @@ PARAM_PRESETS = {
         "top_p": 0.9,
         "top_k": 30,
         "max_tokens": 896,
-        "desc": "Balanced default."
+        "desc": "Balanced default tuned for clearer, lower-hallucination speech."
     },
     "faithful": {
         "temperature": 0.0,
         "top_p": 0.85,
         "top_k": 10,
         "max_tokens": 768,
-        "desc": "Faithful, less hallucination."
+        "desc": "Most conservative preset for transcript-faithful output."
     },
 }
 
@@ -223,8 +243,25 @@ def gradio_ui():
         d = PARAM_PRESETS[name]
         return d["temperature"], d["top_p"], d["top_k"], d["max_tokens"]
 
-    with gr.Blocks(title="HiggsAudio Minimal Interface") as demo:
-        gr.Markdown("## HiggsAudio Text-to-Speech")
+    with gr.Blocks(title="HiggsAudio V2 Interface") as demo:
+        gr.Markdown("## HiggsAudio V2 Text-to-Speech")
+        gr.Markdown(
+            "Local UI for the `bosonai/higgs-audio-v2-generation-3B-base` model and `bosonai/higgs-audio-v2-tokenizer`."
+        )
+        gr.Markdown(
+            "HiggsAudio V2 is a text-audio foundation model trained on `10M+` hours of audio data. Public docs describe a unified audio tokenizer, a `DualFFN` audio adapter, `24kHz` generation, zero-shot voice cloning, and multi-speaker dialogue support."
+        )
+        with gr.Accordion("About HiggsAudio V2", open=False):
+            gr.Markdown(
+                """
+                - GitHub repo: `boson-ai/higgs-audio`
+                - Hugging Face model: `bosonai/higgs-audio-v2-generation-3B-base`
+                - Hugging Face tokenizer: `bosonai/higgs-audio-v2-tokenizer`
+                - Pipeline tag on Hugging Face: `text-to-speech`
+                - Supported public workflows: smart voice TTS, zero-shot voice cloning, multi-speaker dialogue, narration, and some speech-plus-audio effects
+                - Recommended usage pattern: build a chat-style prompt with `system` and `user` messages, then optionally add reference audio for cloning
+                """
+            )
         model_status = gr.Markdown("Status: Not loaded")
         # Model config
         with gr.Accordion("Model Config", open=False):
@@ -239,6 +276,8 @@ def gradio_ui():
         # Prompt and params
         example_drop = gr.Dropdown(list(EXAMPLES.keys()), value="Simple", label="Prompt Example")
         preset_drop = gr.Dropdown(list(PARAM_PRESETS.keys()), value="default", label="Parameter Preset")
+        example_info = gr.Markdown(EXAMPLES["Simple"]["desc"])
+        preset_info = gr.Markdown(PARAM_PRESETS["default"]["desc"])
         sys_prompt = gr.TextArea(label="System Prompt", value=EXAMPLES["Simple"]["system_prompt"], lines=2)
         txt_input = gr.TextArea(label="Input Text", value=EXAMPLES["Simple"]["input_text"], lines=3)
         voice_preset_drop = gr.Dropdown(list(VOICE_PRESETS.keys()), value="EMPTY", label="Voice Preset")
@@ -255,8 +294,22 @@ def gradio_ui():
         gen_btn = gr.Button("Generate Speech")
 
         # Bindings
-        example_drop.change(set_example, inputs=example_drop, outputs=[sys_prompt, txt_input])
-        preset_drop.change(set_params, inputs=preset_drop, outputs=[temperature, top_p, top_k, max_tokens])
+        example_drop.change(
+            lambda name: (EXAMPLES[name]["system_prompt"], EXAMPLES[name]["input_text"], EXAMPLES[name]["desc"]),
+            inputs=example_drop,
+            outputs=[sys_prompt, txt_input, example_info]
+        )
+        preset_drop.change(
+            lambda name: (
+                PARAM_PRESETS[name]["temperature"],
+                PARAM_PRESETS[name]["top_p"],
+                PARAM_PRESETS[name]["top_k"],
+                PARAM_PRESETS[name]["max_tokens"],
+                PARAM_PRESETS[name]["desc"],
+            ),
+            inputs=preset_drop,
+            outputs=[temperature, top_p, top_k, max_tokens, preset_info]
+        )
         init_btn.click(
             fn=lambda m, a, d, f: load_engine(m, a, d, f),
             inputs=[mpath, apath, devsel, fp16box],
