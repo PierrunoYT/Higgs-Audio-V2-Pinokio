@@ -41,17 +41,17 @@ DEFAULT_STOP_STRINGS = ["<|end_of_text|>", "<|eot_id|>"]
 
 # --- Preconfigured prompts and parameter sets ---
 EXAMPLES = {
-    "Simple": {
+    "voice-clone": {
+        "system_prompt": "",
+        "input_text": "Hey there! I am your friendly voice twin in the making. Pick a voice preset below or upload your own audio - let's clone some vocals and bring your voice to life!",
+        "desc": "Voice clone with reference audio. Leave the system prompt empty."
+    },
+    "smart-voice": {
         "system_prompt": DEFAULT_SYSTEM_PROMPT,
         "input_text": "The sun rises in the east and sets in the west. This simple fact has been observed by humans for thousands of years.",
-        "desc": "Single-speaker smart voice generation without a reference clip."
+        "desc": "Smart voice generation from text context."
     },
-    "Clone": {
-        "system_prompt": "",
-        "input_text": "The sun rises in the east and sets in the west. This simple fact has been observed by humans for thousands of years.",
-        "desc": "Zero-shot voice cloning with reference audio plus transcript."
-    },
-    "Dialogue": {
+    "multispeaker-voice-description": {
         "system_prompt": (
             "You are an AI assistant designed to convert text into speech.\n"
             "If the user's message includes a [SPEAKER*] tag, do not read out the tag and generate speech for the following text, using the specified voice.\n"
@@ -67,9 +67,29 @@ EXAMPLES = {
             "[SPEAKER0] Overreact? You made a decision that affects both of us without even considering my opinion!\n"
             "[SPEAKER1] Because I didn't have time to sit around waiting for you to make up your mind! Someone had to act."
         ),
-        "desc": "Multi-speaker dialogue generation using speaker tags and scene instructions."
+        "desc": "Multispeaker dialogue with voice descriptions in system prompt."
+    },
+    "single-speaker-voice-description": {
+        "system_prompt": (
+            "Generate audio following instruction.\n"
+            "<|scene_desc_start|>\n"
+            "SPEAKER0: He speaks with a clear British accent and a conversational, inquisitive tone. His delivery is articulate and at a moderate pace, and very clear audio.\n"
+            "<|scene_desc_end|>"
+        ),
+        "input_text": (
+            "Hey, everyone! Welcome back to Tech Talk Tuesdays.\n"
+            "It is your host, Alex, and today we are diving into a topic that has become crucial in the tech world - deep learning.\n"
+            "So here is the big question: do you want to understand how deep learning works?"
+        ),
+        "desc": "Single speaker with explicit voice description."
+    },
+    "single-speaker-bgm": {
+        "system_prompt": DEFAULT_SYSTEM_PROMPT,
+        "input_text": "[music start] I will remember this, thought Ender, when I am defeated. To keep dignity, and give honor where it is due, so that defeat is not disgrace. [music end]",
+        "desc": "Single speaker with background music tags (experimental)."
     },
 }
+DEFAULT_EXAMPLE = "smart-voice"
 PARAM_PRESETS = {
     "default": {
         "temperature": 0.2,
@@ -84,6 +104,13 @@ PARAM_PRESETS = {
         "top_k": 10,
         "max_tokens": 768,
         "desc": "Most conservative preset for transcript-faithful output."
+    },
+    "hf-space-default": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 50,
+        "max_tokens": 1024,
+        "desc": "Defaults used in the public HF Space demo."
     },
 }
 
@@ -295,12 +322,12 @@ def gradio_ui():
             model_msg = gr.Textbox(interactive=False)
 
         # Prompt and params
-        example_drop = gr.Dropdown(list(EXAMPLES.keys()), value="Simple", label="Prompt Example")
+        example_drop = gr.Dropdown(list(EXAMPLES.keys()), value=DEFAULT_EXAMPLE, label="Prompt Example")
         preset_drop = gr.Dropdown(list(PARAM_PRESETS.keys()), value="default", label="Parameter Preset")
-        example_info = gr.Markdown(EXAMPLES["Simple"]["desc"])
+        example_info = gr.Markdown(EXAMPLES[DEFAULT_EXAMPLE]["desc"])
         preset_info = gr.Markdown(PARAM_PRESETS["default"]["desc"])
-        sys_prompt = gr.TextArea(label="System Prompt", value=EXAMPLES["Simple"]["system_prompt"], lines=2)
-        txt_input = gr.TextArea(label="Input Text", value=EXAMPLES["Simple"]["input_text"], lines=3)
+        sys_prompt = gr.TextArea(label="System Prompt", value=EXAMPLES[DEFAULT_EXAMPLE]["system_prompt"], lines=2)
+        txt_input = gr.TextArea(label="Input Text", value=EXAMPLES[DEFAULT_EXAMPLE]["input_text"], lines=3)
         voice_preset_drop = gr.Dropdown(list(VOICE_PRESETS.keys()), value="EMPTY", label="Voice Preset")
         ref_audio = gr.Audio(label="Reference Audio", type="filepath")
         ref_text = gr.TextArea(label="Reference Transcript", lines=2)
