@@ -468,7 +468,12 @@ def text_to_speech(
 
 
 def create_ui():
-    my_theme = gr.Theme.load("theme.json")
+    theme_path = os.path.join(ROOT, "theme.json")
+    if os.path.exists(theme_path):
+        my_theme = gr.Theme.load(theme_path)
+    else:
+        logger.warning("theme.json not found. Using default Gradio theme.")
+        my_theme = None
 
     # Add custom CSS to disable focus highlighting on textboxes
     custom_css = """
