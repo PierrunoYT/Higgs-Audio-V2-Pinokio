@@ -3,6 +3,7 @@ module.exports = {
     // Clone the official Higgs Audio package from Boson AI
     {
       method: "shell.run",
+      when: "{{!exists('temp_higgs')}}",
       params: {
         message: [
           "git clone https://github.com/boson-ai/higgs-audio.git temp_higgs"
