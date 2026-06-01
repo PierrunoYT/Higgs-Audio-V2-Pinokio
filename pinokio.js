@@ -1,8 +1,5 @@
 module.exports = {
-  version: "1.0.0",
-  title: "Higgs Audio V2 Enhanced",
-  description: "Advanced text-to-speech with voice cloning, multi-speaker support, and background music generation using Higgs Audio V2",
-  icon: "icon.jpg",
+  version: "5.0",
   menu: async (kernel, info) => {
     let installed = info.exists("env")
     let running = {

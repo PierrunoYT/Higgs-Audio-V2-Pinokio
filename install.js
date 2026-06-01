@@ -1,4 +1,7 @@
 module.exports = {
+  requires: {
+    bundle: "ai"
+  },
   run: [
     // Clone the official Higgs Audio package from Boson AI
     {
