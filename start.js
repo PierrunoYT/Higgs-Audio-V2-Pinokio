@@ -15,7 +15,7 @@ module.exports = async (kernel) => {
             "python app.py"
           ],
           on: [{
-            event: "/(http:\\/\\/[0-9.:]+)/",
+            event: "/(http:\\/\\/127\\.0\\.0\\.1:[0-9]+)/",
             done: true
           }]
         }

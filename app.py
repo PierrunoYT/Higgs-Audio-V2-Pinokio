@@ -44,6 +44,7 @@ except ImportError:
 
 # Global engine instance
 engine = None
+DEVICE_OVERRIDE = None
 
 # Default model configuration
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -52,9 +53,13 @@ DEFAULT_AUDIO_TOKENIZER_PATH = "bosonai/higgs-audio-v2-tokenizer"
 LOCAL_MODEL_PATH = os.path.join(ROOT, "models", "higgs-audio-v2-generation-3B-base")
 LOCAL_AUDIO_TOKENIZER_PATH = os.path.join(ROOT, "models", "higgs-audio-v2-tokenizer")
 SAMPLE_RATE = 24000
-VOICE_PRESET_SPACE_REPO = "smola/higgs_audio_v2"
+# Third-party HF Space (not maintained by Boson AI) that hosts the demo voice presets.
+# Override with the HIGGS_VOICE_PRESET_SPACE_REPO env var if you'd rather point at your own copy.
+VOICE_PRESET_SPACE_REPO = os.environ.get("HIGGS_VOICE_PRESET_SPACE_REPO", "smola/higgs_audio_v2")
 VOICE_PRESET_DIR = "voice_examples"
-TEMP_HIGGS_VOICE_DIR = os.path.join(ROOT, "temp_higgs", "voice_examples")
+# Kept outside temp_higgs/ (the cloned upstream source repo) to avoid mixing a git checkout
+# with downloaded cache files.
+VOICE_PRESET_CACHE_DIR = os.path.join(ROOT, "voice_preset_cache", "voice_examples")
 
 DEFAULT_SYSTEM_PROMPT = (
     "Generate audio following instruction.\n\n"
@@ -131,6 +136,8 @@ def encode_audio_file(file_path):
 
 def get_current_device():
     """Get the current device."""
+    if DEVICE_OVERRIDE is not None:
+        return DEVICE_OVERRIDE
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -142,8 +149,8 @@ def resolve_model_and_tokenizer_paths():
 
 
 def _download_voice_preset_file(filename: str):
-    """Resolve a voice preset file from local temp_higgs first, then HF."""
-    local_path = os.path.join(TEMP_HIGGS_VOICE_DIR, filename)
+    """Resolve a voice preset file from the local cache first, then HF."""
+    local_path = os.path.join(VOICE_PRESET_CACHE_DIR, filename)
     if os.path.exists(local_path):
         return local_path
 
@@ -152,6 +159,11 @@ def _download_voice_preset_file(filename: str):
     except Exception as e:
         logger.warning(f"huggingface_hub not available for voice presets: {e}")
         return None
+
+    logger.info(
+        f"Downloading voice preset '{filename}' from third-party HF Space '{VOICE_PRESET_SPACE_REPO}' "
+        "(set HIGGS_VOICE_PRESET_SPACE_REPO to override)."
+    )
 
     rel_path = f"{VOICE_PRESET_DIR}/{filename}"
     try:
@@ -415,7 +427,11 @@ def text_to_speech(
 
     if engine is None:
         model_path, tokenizer_path = resolve_model_and_tokenizer_paths()
-        initialize_engine(model_path, tokenizer_path)
+        if not initialize_engine(model_path, tokenizer_path):
+            error_msg = "Error generating speech: failed to initialize HiggsAudioServeEngine (see logs above for details)"
+            logger.error(error_msg)
+            gr.Error(error_msg)
+            return f"❌ {error_msg}", None
 
     try:
         # Prepare ChatML sample
@@ -441,7 +457,7 @@ def text_to_speech(
             top_p=top_p,
             stop_strings=stop_list,
             ras_win_len=ras_win_len if ras_win_len > 0 else None,
-            ras_win_max_num_repeat=max(ras_win_len, ras_win_max_num_repeat),
+            ras_win_max_num_repeat=ras_win_max_num_repeat if ras_win_max_num_repeat > 0 else None,
         )
 
         generation_time = time.time() - start_time
@@ -753,22 +769,22 @@ def create_ui():
 
 def main():
     """Main function to parse arguments and launch the UI."""
-    global DEFAULT_MODEL_PATH, DEFAULT_AUDIO_TOKENIZER_PATH, VOICE_PRESETS
+    global VOICE_PRESETS, DEVICE_OVERRIDE
 
     parser = argparse.ArgumentParser(description="Gradio UI for Text-to-Speech using HiggsAudioServeEngine")
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda",
+        default=None,
         choices=["cuda", "cpu"],
-        help="Device to run the model on.",
+        help="Device to run the model on. Defaults to auto-detecting CUDA availability.",
     )
     parser.add_argument("--host", type=str, default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"), help="Host for the Gradio interface.")
     parser.add_argument("--port", type=int, default=int(os.environ.get("GRADIO_SERVER_PORT", "7860")), help="Port for the Gradio interface.")
 
     args = parser.parse_args()
 
-    # Update default values if provided via command line
+    DEVICE_OVERRIDE = args.device
     VOICE_PRESETS = load_voice_presets()
 
     # Create and launch the UI

@@ -36,6 +36,7 @@ temp_higgs/
 higgs-audio/
 models/
 app/
+voice_preset_cache/
 
 # PyTorch
 *.pth

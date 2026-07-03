@@ -14,5 +14,10 @@ module.exports = {
     params: {
       path: "models"
     }
+  }, {
+    method: "fs.rm",
+    params: {
+      path: "voice_preset_cache"
+    }
   }]
 }
