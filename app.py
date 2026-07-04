@@ -621,7 +621,7 @@ def create_ui():
                         datatype=["str"],
                         value=[[s] for s in DEFAULT_STOP_STRINGS],
                         interactive=True,
-                        column_count=(1, "fixed"),
+                        col_count=(1, "fixed"),
                     )
 
                 submit_btn = gr.Button("Generate Speech", variant="primary", scale=1)
