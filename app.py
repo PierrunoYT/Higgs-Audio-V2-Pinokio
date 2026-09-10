@@ -13,7 +13,6 @@ import gradio as gr
 from loguru import logger
 import numpy as np
 import time
-from functools import lru_cache
 import re
 import torch
 
@@ -45,6 +44,7 @@ except ImportError:
 # Global engine instance
 engine = None
 DEVICE_OVERRIDE = None
+VOICE_PRESETS = {"EMPTY": "No reference voice"}
 
 # Default model configuration
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -127,7 +127,6 @@ PREDEFINED_EXAMPLES = {
 }
 
 
-@lru_cache(maxsize=20)
 def encode_audio_file(file_path):
     """Encode an audio file to base64."""
     with open(file_path, "rb") as audio_file:
@@ -150,6 +149,8 @@ def resolve_model_and_tokenizer_paths():
 
 def _download_voice_preset_file(filename: str):
     """Resolve a voice preset file from the local cache first, then HF."""
+    if not filename or filename in {".", ".."} or "/" in filename or "\\" in filename:
+        raise ValueError("Invalid voice preset filename")
     local_path = os.path.join(VOICE_PRESET_CACHE_DIR, filename)
     if os.path.exists(local_path):
         return local_path
@@ -171,6 +172,7 @@ def _download_voice_preset_file(filename: str):
             repo_id=VOICE_PRESET_SPACE_REPO,
             repo_type="space",
             filename=rel_path,
+            local_dir=os.path.dirname(VOICE_PRESET_CACHE_DIR),
         )
     except Exception as e:
         logger.warning(f"Failed downloading {rel_path} from {VOICE_PRESET_SPACE_REPO}: {e}")
@@ -199,6 +201,8 @@ def load_voice_presets():
 
 def get_voice_preset(voice_preset):
     """Get cached voice wav path + transcript for a given voice preset."""
+    if voice_preset == "EMPTY" or voice_preset not in VOICE_PRESETS:
+        raise ValueError("Unknown voice preset")
     voice_path = _download_voice_preset_file(f"{voice_preset}.wav")
     if not voice_path or not os.path.exists(voice_path):
         logger.warning(f"Voice preset file not found on HF: {voice_preset}.wav")
@@ -274,6 +278,9 @@ def normalize_text(transcript: str):
     transcript = "\n".join([" ".join(line.split()) for line in lines if line.strip()])
     transcript = transcript.strip()
 
+    if not transcript:
+        return ""
+
     if not any([transcript.endswith(c) for c in [".", "!", "?", ",", ";", '"', "'", "</SE_e>", "</SE>"]]):
         transcript += "."
 
@@ -308,9 +315,15 @@ def initialize_engine(model_path, audio_tokenizer_path) -> bool:
 
 
 def check_return_audio(audio_wv: np.ndarray):
-    # check if the audio returned is all silent
-    if np.all(audio_wv == 0):
-        logger.warning("Audio is silent, returning None")
+    """Convert finite, non-silent samples to PCM without integer overflow."""
+    audio_wv = np.asarray(audio_wv)
+    if audio_wv.size == 0 or not np.all(np.isfinite(audio_wv)):
+        raise ValueError("Generated audio is empty or contains non-finite samples")
+    audio_data = (np.clip(audio_wv, -1.0, 1.0) * 32767).astype(np.int16)
+    if not np.any(audio_data):
+        gr.Warning("Generated audio is silent. Try generating again.")
+        return None
+    return audio_data
 
 
 def process_text_output(text_output: str):
@@ -326,17 +339,21 @@ def extract_stop_strings(stop_strings):
     try:
         if isinstance(stop_strings, dict) and "stops" in stop_strings:
             values = stop_strings["stops"]
+        elif isinstance(stop_strings, dict) and "data" in stop_strings:
+            values = [row[0] for row in stop_strings["data"] if row]
         elif hasattr(stop_strings, "columns") and hasattr(stop_strings, "values"):
             if "stops" in list(stop_strings.columns):
                 values = stop_strings["stops"].tolist()
             else:
                 values = [row[0] for row in stop_strings.values.tolist() if row]
         elif isinstance(stop_strings, list):
-            values = [row[0] if isinstance(row, (list, tuple)) and row else row for row in stop_strings]
+            values = [row[0] if isinstance(row, (list, tuple)) else row for row in stop_strings if row]
         else:
             values = []
 
-        cleaned = [str(v).strip() for v in values if v is not None and str(v).strip()]
+        if isinstance(values, str):
+            values = [values]
+        cleaned = [v.strip() for v in values if isinstance(v, str) and v.strip()]
         return cleaned if cleaned else DEFAULT_STOP_STRINGS
     except Exception:
         return DEFAULT_STOP_STRINGS
@@ -353,7 +370,7 @@ def prepare_chatml_sample(
     messages = []
 
     # Add system message if provided
-    if len(system_prompt) > 0:
+    if system_prompt:
         messages.append(Message(role="system", content=system_prompt))
 
     # Add reference audio if provided
@@ -368,7 +385,7 @@ def prepare_chatml_sample(
         # Voice preset
         voice_path, ref_text = get_voice_preset(voice_preset)
         if voice_path is None:
-            logger.warning(f"Voice preset {voice_preset} not found, skipping reference audio")
+            raise ValueError(f"Voice preset {voice_preset} is unavailable; upload reference audio or select EMPTY")
         else:
             audio_base64 = encode_audio_file(voice_path)
 
@@ -425,13 +442,15 @@ def text_to_speech(
     """
     global engine
 
+    if not isinstance(text, str) or not normalize_text(text):
+        raise gr.Error("Enter text to generate speech.")
+
     if engine is None:
         model_path, tokenizer_path = resolve_model_and_tokenizer_paths()
         if not initialize_engine(model_path, tokenizer_path):
             error_msg = "Error generating speech: failed to initialize HiggsAudioServeEngine (see logs above for details)"
             logger.error(error_msg)
-            gr.Error(error_msg)
-            return f"❌ {error_msg}", None
+            raise gr.Error(error_msg)
 
     try:
         # Prepare ChatML sample
@@ -469,8 +488,9 @@ def text_to_speech(
 
         if response.audio is not None:
             # Convert to int16 for Gradio
-            audio_data = (response.audio * 32767).astype(np.int16)
-            check_return_audio(audio_data)
+            audio_data = check_return_audio(response.audio)
+            if audio_data is None:
+                return text_output, None
             return text_output, (response.sampling_rate, audio_data)
         else:
             logger.warning("No audio generated")
@@ -479,8 +499,7 @@ def text_to_speech(
     except Exception as e:
         error_msg = f"Error generating speech: {e}"
         logger.error(error_msg)
-        gr.Error(error_msg)
-        return f"❌ {error_msg}", None
+        raise gr.Error(error_msg) from e
 
 
 def create_ui():
@@ -529,7 +548,7 @@ def create_ui():
     default_template = "smart-voice"
 
     """Create the Gradio UI."""
-    with gr.Blocks() as demo:
+    with gr.Blocks(theme=my_theme, css=custom_css) as demo:
         gr.Markdown("# Higgs Audio Text-to-Speech Playground")
 
         # Main UI section
@@ -630,7 +649,7 @@ def create_ui():
                 output_text = gr.TextArea(label="Model Response", lines=2)
 
                 # Audio output
-                output_audio = gr.Audio(label="Generated Audio", interactive=False, autoplay=True)
+                output_audio = gr.Audio(label="Generated Audio", interactive=False, autoplay=True, elem_id="generated-audio")
 
                 stop_btn = gr.Button("Stop Playback", variant="primary")
 
@@ -692,7 +711,9 @@ def create_ui():
                 template = PREDEFINED_EXAMPLES[template_name]
                 # Enable voice preset and custom reference only for voice-clone template
                 is_voice_clone = template_name == "voice-clone"
-                voice_preset_value = "belinda" if is_voice_clone else "EMPTY"
+                voice_preset_value = (
+                    "belinda" if "belinda" in VOICE_PRESETS else next(iter(VOICE_PRESETS), "EMPTY")
+                ) if is_voice_clone else "EMPTY"
                 # Set ras_win_len to 0 for single-speaker-bgm, 7 for others
                 ras_win_len_value = 0 if template_name == "single-speaker-bgm" else 7
                 description_text = f'<p style="font-size: 0.85em; color: var(--body-text-color-subdued); margin: 0; padding: 0;"> {template["description"]}</p>'
@@ -706,9 +727,13 @@ def create_ui():
                     gr.update(visible=is_voice_clone),  # custom reference accordion visibility
                     gr.update(visible=is_voice_clone),  # voice samples section visibility
                     ras_win_len_value,  # ras_win_len
+                    gr.update() if is_voice_clone else None,
+                    gr.update() if is_voice_clone else "",
                 )
             else:
                 return (
+                    gr.update(),
+                    gr.update(),
                     gr.update(),
                     gr.update(),
                     gr.update(),
@@ -732,6 +757,8 @@ def create_ui():
                 custom_reference_accordion,
                 voice_samples_section,
                 ras_win_len,
+                reference_audio,
+                reference_text,
             ],
         )
 
@@ -754,14 +781,14 @@ def create_ui():
             ],
             outputs=[output_text, output_audio],
             api_name="generate_speech",
+            concurrency_limit=1,
         )
 
         # Stop button functionality
         stop_btn.click(
-            fn=lambda: None,
-            inputs=[],
-            outputs=[output_audio],
-            js="() => {const audio = document.querySelector('audio'); if(audio) audio.pause(); return null;}",
+            fn=None,
+            queue=False,
+            js="() => {const audio = document.querySelector('#generated-audio audio'); if(audio) audio.pause();}",
         )
 
     return demo, my_theme, custom_css
