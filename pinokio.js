@@ -1,7 +1,7 @@
 module.exports = {
   version: "5.0",
   menu: async (kernel, info) => {
-    let installed = info.exists("env")
+    let installed = info.exists("env/.installed")
     let running = {
       install: info.running("install.js"),
       start: info.running("start.js"),
@@ -16,6 +16,10 @@ module.exports = {
         text: "Installing",
         href: "install.js",
       }]
+    } else if (running.reset || running.update || running.link) {
+      const task = running.reset ? "reset" : running.update ? "update" : "link"
+      const labels = { reset: "Resetting", update: "Updating", link: "Deduplicating" }
+      return [{ default: true, icon: "fa-solid fa-terminal", text: labels[task], href: `${task}.js` }]
     } else if (installed) {
       if (running.start) {
         let local = info.local("start.js")
@@ -38,27 +42,6 @@ module.exports = {
             href: "start.js",
           }]
         }
-      } else if (running.update) {
-        return [{
-          default: true,
-          icon: 'fa-solid fa-terminal',
-          text: "Updating",
-          href: "update.js",
-        }]
-      } else if (running.reset) {
-        return [{
-          default: true,
-          icon: 'fa-solid fa-terminal',
-          text: "Resetting",
-          href: "reset.js",
-        }]
-      } else if (running.link) {
-        return [{
-          default: true,
-          icon: 'fa-solid fa-terminal',
-          text: "Deduplicating",
-          href: "link.js",
-        }]
       } else {
         return [{
           default: true,

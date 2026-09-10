@@ -3,6 +3,11 @@ module.exports = {
     bundle: "ai"
   },
   run: [
+    {
+      method: "fs.rm",
+      when: "{{exists('env/.installed')}}",
+      params: { path: "env/.installed" }
+    },
     // Clone the official Higgs Audio package from Boson AI
     {
       method: "shell.run",
@@ -20,29 +25,7 @@ module.exports = {
       params: {
         venv: "env",
         message: [
-          "uv pip install -r temp_higgs/requirements.txt"
-        ]
-      }
-    },
-
-    // Install main app dependencies
-    {
-      method: "shell.run",
-      params: {
-        venv: "env",
-        message: [
-          "uv pip install -r requirements.txt"
-        ]
-      }
-    },
-
-    // Install boson_multimodal package in development mode
-    {
-      method: "shell.run",
-      params: {
-        venv: "env",
-        message: [
-          "uv pip install -e temp_higgs/"
+          "uv pip install -r temp_higgs/requirements.txt -r requirements.txt -e temp_higgs/"
         ]
       }
     },
@@ -81,9 +64,14 @@ module.exports = {
       params: {
         venv: "env",
         message: [
-          "python -c \"from boson_multimodal.serve.serve_engine import HiggsAudioServeEngine; print('All imports working correctly')\""
+          "uv pip check",
+          "python -c \"import app; print('All imports working correctly')\""
         ]
       }
+    },
+    {
+      method: "fs.write",
+      params: { path: "env/.installed", text: "Installation verified" }
     }
   ]
 }

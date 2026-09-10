@@ -7,9 +7,8 @@ module.exports = {
       "params": {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
-        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 {{args && args.xformers ? 'xformers' : ''}} --index-url https://download.pytorch.org/whl/cu128 --force-reinstall --no-deps"
-      },
-      "next": null
+        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 numpy==1.26.4 {{args && args.xformers ? 'xformers==0.0.30' : ''}} --index-url https://download.pytorch.org/whl/cu128 --force-reinstall"
+      }
     },
     {
       "when": "{{platform === 'win32' && gpu === 'nvidia' && args && args.triton}}",
@@ -18,8 +17,7 @@ module.exports = {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
         "message": "uv pip install triton-windows==3.3.1.post19"
-      },
-      "next": null
+      }
     },
     {
       "when": "{{platform === 'win32' && gpu === 'nvidia' && args && args.sageattention}}",
@@ -28,19 +26,17 @@ module.exports = {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
         "message": "python -c \"import sys; import subprocess; mv='sageattention'; v=f'cp{sys.version_info[0]}{sys.version_info[1]}'; tag=f'sageattention-2.1.1+cu128torch2.7.0-{v}-{v}-win_amd64.whl'; url=f'https://github.com/woct0rdho/SageAttention/releases/download/v2.1.1-windows/{tag}'; subprocess.check_call(['uv', 'pip', 'install', url])\""
-      },
-      "next": null
+      }
     },
-    // windows amd
+    // Windows AMD uses CPU: this app does not implement DirectML.
     {
       "when": "{{platform === 'win32' && gpu === 'amd'}}",
       "method": "shell.run",
       "params": {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
-        "message": "uv pip install torch-directml==0.2.5.dev240914 torchaudio==2.4.1 torchvision==0.19.1 numpy==1.26.4 --force-reinstall --no-deps"
-      },
-      "next": null
+        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 numpy==1.26.4 --index-url https://download.pytorch.org/whl/cpu --force-reinstall"
+      }
     },
     // windows cpu
     {
@@ -49,9 +45,8 @@ module.exports = {
       "params": {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
-        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 numpy==1.26.4 --force-reinstall --no-deps"
-      },
-      "next": null
+        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 numpy==1.26.4 --index-url https://download.pytorch.org/whl/cpu --force-reinstall"
+      }
     },
     // mac
     {
@@ -60,9 +55,8 @@ module.exports = {
       "params": {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
-        "message": "uv pip install torch torchvision torchaudio"
-      },
-      "next": null
+        "message": "uv pip install torch torchvision torchaudio numpy==1.26.4"
+      }
     },
     // linux nvidia
     {
@@ -71,9 +65,8 @@ module.exports = {
       "params": {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
-        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 {{args && args.xformers ? 'xformers' : ''}} --index-url https://download.pytorch.org/whl/cu128 --force-reinstall --no-deps"
-      },
-      "next": null
+        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 numpy==1.26.4 {{args && args.xformers ? 'xformers==0.0.30' : ''}} --index-url https://download.pytorch.org/whl/cu128 --force-reinstall"
+      }
     },
     {
       "when": "{{platform === 'linux' && gpu === 'nvidia' && args && args.sageattention}}",
@@ -82,8 +75,7 @@ module.exports = {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
         "message": "uv pip install git+https://github.com/thu-ml/SageAttention.git"
-      },
-      "next": null
+      }
     },
     // linux rocm (amd)
     {
@@ -92,9 +84,8 @@ module.exports = {
       "params": {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
-        "message": "uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2.4 --force-reinstall --no-deps"
-      },
-      "next": null
+        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 numpy==1.26.4 --index-url https://download.pytorch.org/whl/rocm6.3 --force-reinstall"
+      }
     },
     // linux cpu
     {
@@ -103,9 +94,8 @@ module.exports = {
       "params": {
         "venv": "{{args && args.venv ? args.venv : null}}",
         "path": "{{args && args.path ? args.path : '.'}}",
-        "message": "uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
-      },
-      "next": null
+        "message": "uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 numpy==1.26.4 --index-url https://download.pytorch.org/whl/cpu"
+      }
     }
   ]
 }
