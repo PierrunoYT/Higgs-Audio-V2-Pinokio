@@ -4,7 +4,6 @@ Gradio UI for Text-to-Speech using HiggsAudioServeEngine
 
 import argparse
 import base64
-import inspect
 import os
 import uuid
 import json
@@ -510,34 +509,8 @@ def create_ui():
         logger.warning("theme.json not found. Using default Gradio theme.")
         my_theme = None
 
-    # Add custom CSS to disable focus highlighting on textboxes
+    # Preserve visible keyboard focus while applying the checkbox accent.
     custom_css = """
-    .gradio-container input:focus,
-    .gradio-container textarea:focus,
-    .gradio-container select:focus,
-    .gradio-container .gr-input:focus,
-    .gradio-container .gr-textarea:focus,
-    .gradio-container .gr-textbox:focus,
-    .gradio-container .gr-textbox:focus-within,
-    .gradio-container .gr-form:focus-within,
-    .gradio-container *:focus {
-        box-shadow: none !important;
-        border-color: var(--border-color-primary) !important;
-        outline: none !important;
-        background-color: var(--input-background-fill) !important;
-    }
-
-    /* Override any hover effects as well */
-    .gradio-container input:hover,
-    .gradio-container textarea:hover,
-    .gradio-container select:hover,
-    .gradio-container .gr-input:hover,
-    .gradio-container .gr-textarea:hover,
-    .gradio-container .gr-textbox:hover {
-        border-color: var(--border-color-primary) !important;
-        background-color: var(--input-background-fill) !important;
-    }
-
     /* Style for checked checkbox */
     .gradio-container input[type="checkbox"]:checked {
         background-color: var(--primary-500) !important;
@@ -677,7 +650,7 @@ def create_ui():
             try:
                 # Get the preset name from the clicked row
                 preset_names = [preset for preset in VOICE_PRESETS.keys() if preset != "EMPTY"]
-                if evt.index[0] < len(preset_names):
+                if 0 <= evt.index[0] < len(preset_names):
                     preset = preset_names[evt.index[0]]
                     voice_path, _ = get_voice_preset(preset)
                     if voice_path and os.path.exists(voice_path):
@@ -690,8 +663,7 @@ def create_ui():
                     return None
             except Exception as e:
                 logger.error(f"Error playing voice sample: {e}")
-                gr.Error(f"Error playing voice sample: {e}")
-                return None
+                raise gr.Error(f"Error playing voice sample: {e}") from e
 
         voice_samples_table.select(fn=play_voice_sample, outputs=[sample_audio])
 
@@ -705,7 +677,8 @@ def create_ui():
 
             Returns:
                 Tuple of updated values for system_prompt, input_text, template_description,
-                voice_preset, custom_reference_accordion, voice_samples_section, and ras_win_len
+                voice_preset, custom_reference_accordion, voice_samples_section, ras_win_len,
+                reference_audio, and reference_text
             """
             if template_name in PREDEFINED_EXAMPLES:
                 template = PREDEFINED_EXAMPLES[template_name]
@@ -807,7 +780,7 @@ def main():
         help="Device to run the model on. Defaults to auto-detecting CUDA availability.",
     )
     parser.add_argument("--host", type=str, default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"), help="Host for the Gradio interface.")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("GRADIO_SERVER_PORT", "7860")), help="Port for the Gradio interface.")
+    parser.add_argument("--port", type=int, default=os.environ.get("GRADIO_SERVER_PORT"), help="Port for the Gradio interface. Defaults to the next available Gradio port.")
 
     args = parser.parse_args()
 
@@ -815,16 +788,11 @@ def main():
     VOICE_PRESETS = load_voice_presets()
 
     # Create and launch the UI
-    demo, my_theme, custom_css = create_ui()
+    demo, _, _ = create_ui()
     launch_kwargs = {
         "server_name": args.host,
         "server_port": args.port,
     }
-    launch_params = inspect.signature(demo.launch).parameters
-    if "theme" in launch_params:
-        launch_kwargs["theme"] = my_theme
-    if "css" in launch_params:
-        launch_kwargs["css"] = custom_css
     demo.launch(**launch_kwargs)
 
 
