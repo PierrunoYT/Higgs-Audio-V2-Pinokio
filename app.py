@@ -444,6 +444,15 @@ def text_to_speech(
     if not isinstance(text, str) or not normalize_text(text):
         raise gr.Error("Enter text to generate speech.")
 
+    # API clients may send floats (e.g. 50.0); the engine requires integers for these
+    try:
+        max_completion_tokens = int(max_completion_tokens)
+        top_k = int(top_k)
+        ras_win_len = int(ras_win_len)
+        ras_win_max_num_repeat = int(ras_win_max_num_repeat)
+    except (TypeError, ValueError) as e:
+        raise gr.Error(f"Invalid generation parameter: {e}") from e
+
     if engine is None:
         model_path, tokenizer_path = resolve_model_and_tokenizer_paths()
         if not initialize_engine(model_path, tokenizer_path):

@@ -105,6 +105,18 @@ class AppTests(unittest.TestCase):
         self.assertEqual(audio[0], 24000)
         self.assertIsNone(app.engine.generate.call_args.kwargs["top_k"])
 
+    def test_float_api_parameters_become_integers(self):
+        app.engine = MagicMock()
+        app.engine.generate.return_value = types.SimpleNamespace(generated_text="", audio=None, sampling_rate=24000)
+        app.text_to_speech("Hello", "EMPTY", max_completion_tokens=512.0, top_k=50.0,
+                           ras_win_len=7.0, ras_win_max_num_repeat=2.0)
+        kwargs = app.engine.generate.call_args.kwargs
+        for name, value in (("max_new_tokens", 512), ("top_k", 50), ("ras_win_len", 7), ("ras_win_max_num_repeat", 2)):
+            self.assertEqual(kwargs[name], value)
+            self.assertIs(type(kwargs[name]), int)
+        with self.assertRaises(app.gr.Error):
+            app.text_to_speech("Hello", "EMPTY", top_k=None)
+
     def test_voice_sample_uses_clicked_row_value(self):
         app.VOICE_PRESETS = {"alice": "a", "bob": "b", "EMPTY": "No reference voice"}
         app.create_ui()
