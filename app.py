@@ -801,6 +801,8 @@ def main():
     launch_kwargs = {
         "server_name": args.host,
         "server_port": args.port,
+        # Voice samples are served from the preset cache, which is outside cwd when not launched from ROOT
+        "allowed_paths": [os.path.dirname(VOICE_PRESET_CACHE_DIR)],
     }
     demo.launch(**launch_kwargs)
 
