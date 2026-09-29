@@ -648,10 +648,10 @@ def create_ui():
                 Path to the voice sample audio file, or None if not found
             """
             try:
-                # Get the preset name from the clicked row
-                preset_names = [preset for preset in VOICE_PRESETS.keys() if preset != "EMPTY"]
-                if 0 <= evt.index[0] < len(preset_names):
-                    preset = preset_names[evt.index[0]]
+                # Use the clicked row's value, not its index: the index shifts when the table is sorted
+                row_value = getattr(evt, "row_value", None)
+                preset = row_value[0] if row_value else None
+                if preset in VOICE_PRESETS and preset != "EMPTY":
                     voice_path, _ = get_voice_preset(preset)
                     if voice_path and os.path.exists(voice_path):
                         return voice_path

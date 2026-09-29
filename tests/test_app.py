@@ -105,6 +105,18 @@ class AppTests(unittest.TestCase):
         self.assertEqual(audio[0], 24000)
         self.assertIsNone(app.engine.generate.call_args.kwargs["top_k"])
 
+    def test_voice_sample_uses_clicked_row_value(self):
+        app.VOICE_PRESETS = {"alice": "a", "bob": "b", "EMPTY": "No reference voice"}
+        app.create_ui()
+        callback = app.gr.Dataframe.return_value.select.call_args.kwargs["fn"]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "bob.wav"
+            path.write_bytes(b"x")
+            with patch.object(app, "get_voice_preset", return_value=(str(path), "b")) as get:
+                # Sorted table: row 0 now shows "bob"
+                self.assertEqual(callback(types.SimpleNamespace(index=[0, 0], row_value=["bob", "b"])), str(path))
+                get.assert_called_once_with("bob")
+
     def test_template_clears_hidden_reference_and_handles_offline_presets(self):
         app.create_ui()
         event = app.gr.Dropdown.return_value.change.call_args.kwargs
