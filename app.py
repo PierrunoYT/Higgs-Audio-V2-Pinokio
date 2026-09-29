@@ -511,6 +511,7 @@ def text_to_speech(
 
 
 def create_ui():
+    """Create the Gradio UI."""
     theme_path = os.path.join(ROOT, "theme.json")
     if os.path.exists(theme_path):
         my_theme = gr.Theme.load(theme_path)
@@ -529,7 +530,6 @@ def create_ui():
 
     default_template = "smart-voice"
 
-    """Create the Gradio UI."""
     with gr.Blocks(theme=my_theme, css=custom_css) as demo:
         gr.Markdown("# Higgs Audio Text-to-Speech Playground")
 
