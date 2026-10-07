@@ -51,6 +51,11 @@ DEFAULT_MODEL_PATH = "bosonai/higgs-audio-v2-generation-3B-base"
 DEFAULT_AUDIO_TOKENIZER_PATH = "bosonai/higgs-audio-v2-tokenizer"
 LOCAL_MODEL_PATH = os.path.join(ROOT, "models", "higgs-audio-v2-generation-3B-base")
 LOCAL_AUDIO_TOKENIZER_PATH = os.path.join(ROOT, "models", "higgs-audio-v2-tokenizer")
+# Boson AI converted both HF repos to a Transformers-native format in 2026 (model_type
+# "higgs_audio_v2", no tokenizer model.pth) that boson_multimodal cannot load. Pin the last
+# revisions in the original format. Keep in sync with install.js.
+MODEL_REVISION = "10840182ca4ad5d9d9113b60b9bb3c1ef1ba3f84"
+AUDIO_TOKENIZER_REVISION = "9d4988fbd4ad07b4cac3a5fa462741a41810dbec"
 SAMPLE_RATE = 24000
 # Third-party HF Space (not maintained by Boson AI) that hosts the demo voice presets.
 # Override with the HIGGS_VOICE_PRESET_SPACE_REPO env var if you'd rather point at your own copy.
@@ -139,10 +144,64 @@ def get_current_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _read_model_type(path):
+    try:
+        with open(os.path.join(path, "config.json"), encoding="utf-8") as f:
+            return json.load(f).get("model_type")
+    except (OSError, ValueError):
+        return None
+
+
+def _is_converted_model_dir(path):
+    # A converted single-file checkpoint would take precedence over the original shards.
+    return _read_model_type(path) == "higgs_audio_v2" or os.path.exists(os.path.join(path, "model.safetensors"))
+
+
+def _is_converted_tokenizer_dir(path):
+    return os.path.exists(os.path.join(path, "model.safetensors"))
+
+
+def is_legacy_model_dir(path):
+    """True if path holds a model download in the format boson_multimodal loads."""
+    return (
+        _read_model_type(path) == "higgs_audio"
+        and os.path.exists(os.path.join(path, "model.safetensors.index.json"))
+        and not _is_converted_model_dir(path)
+    )
+
+
+def is_legacy_tokenizer_dir(path):
+    """True if path holds an audio tokenizer download with model.pth."""
+    return all(os.path.exists(os.path.join(path, name)) for name in ("config.json", "model.pth"))
+
+
+def remove_stale_model_dirs():
+    """Delete local downloads in the converted format; partial original downloads are kept to resume."""
+    import shutil
+
+    for path, is_converted in (
+        (LOCAL_MODEL_PATH, _is_converted_model_dir),
+        (LOCAL_AUDIO_TOKENIZER_PATH, _is_converted_tokenizer_dir),
+    ):
+        if os.path.isdir(path) and is_converted(path):
+            logger.warning(f"Removing download in unsupported converted format: {path}")
+            shutil.rmtree(path)
+
+
 def resolve_model_and_tokenizer_paths():
-    """Prefer locally downloaded artifacts, fallback to HF repo IDs."""
-    model_path = LOCAL_MODEL_PATH if os.path.exists(LOCAL_MODEL_PATH) else DEFAULT_MODEL_PATH
-    tokenizer_path = LOCAL_AUDIO_TOKENIZER_PATH if os.path.exists(LOCAL_AUDIO_TOKENIZER_PATH) else DEFAULT_AUDIO_TOKENIZER_PATH
+    """Prefer valid local downloads, otherwise fetch the pinned HF revisions."""
+    from huggingface_hub import snapshot_download
+
+    if is_legacy_model_dir(LOCAL_MODEL_PATH):
+        model_path = LOCAL_MODEL_PATH
+    else:
+        logger.warning(f"No usable local model at {LOCAL_MODEL_PATH}; downloading {DEFAULT_MODEL_PATH}@{MODEL_REVISION[:12]}.")
+        model_path = snapshot_download(DEFAULT_MODEL_PATH, revision=MODEL_REVISION)
+    if is_legacy_tokenizer_dir(LOCAL_AUDIO_TOKENIZER_PATH):
+        tokenizer_path = LOCAL_AUDIO_TOKENIZER_PATH
+    else:
+        logger.warning(f"No usable local audio tokenizer at {LOCAL_AUDIO_TOKENIZER_PATH}; downloading {DEFAULT_AUDIO_TOKENIZER_PATH}@{AUDIO_TOKENIZER_REVISION[:12]}.")
+        tokenizer_path = snapshot_download(DEFAULT_AUDIO_TOKENIZER_PATH, revision=AUDIO_TOKENIZER_REVISION)
     return model_path, tokenizer_path
 
 

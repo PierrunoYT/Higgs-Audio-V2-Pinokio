@@ -140,6 +140,43 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(ordinary), len(event["outputs"]))
         self.assertEqual(len(callback("unknown")), len(event["outputs"]))
 
+    def test_model_dirs_require_original_format(self):
+        def write(root, name, text="{}"):
+            Path(root, name).write_text(text, encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            model, tokenizer = Path(tmp, "model"), Path(tmp, "tokenizer")
+            model.mkdir(); tokenizer.mkdir()
+            write(model, "config.json", '{"model_type": "higgs_audio_v2"}')
+            write(tokenizer, "config.json")
+            write(tokenizer, "model.safetensors")
+            self.assertFalse(app.is_legacy_model_dir(model))
+            self.assertFalse(app.is_legacy_tokenizer_dir(tokenizer))
+            with patch.object(app, "LOCAL_MODEL_PATH", str(model)),                  patch.object(app, "LOCAL_AUDIO_TOKENIZER_PATH", str(tokenizer)):
+                app.remove_stale_model_dirs()
+            self.assertFalse(model.exists())
+            self.assertFalse(tokenizer.exists())
+
+            # Partial downloads in the original format are kept so hf download can resume.
+            model.mkdir(); tokenizer.mkdir()
+            write(model, "config.json", '{"model_type": "higgs_audio"}')
+            write(tokenizer, "config.json")
+            with patch.object(app, "LOCAL_MODEL_PATH", str(model)),                  patch.object(app, "LOCAL_AUDIO_TOKENIZER_PATH", str(tokenizer)):
+                app.remove_stale_model_dirs()
+            self.assertTrue(model.exists())
+            self.assertFalse(app.is_legacy_model_dir(model))
+            write(model, "model.safetensors.index.json")
+            write(tokenizer, "model.pth")
+            self.assertTrue(app.is_legacy_model_dir(model))
+            self.assertTrue(app.is_legacy_tokenizer_dir(tokenizer))
+
+    def test_missing_local_models_download_pinned_revisions(self):
+        hub = types.SimpleNamespace(snapshot_download=MagicMock(side_effect=lambda repo, revision: f"{repo}@{revision}"))
+        with patch.dict(sys.modules, {"huggingface_hub": hub}),              patch.object(app, "LOCAL_MODEL_PATH", "missing-model"),              patch.object(app, "LOCAL_AUDIO_TOKENIZER_PATH", "missing-tokenizer"):
+            model_path, tokenizer_path = app.resolve_model_and_tokenizer_paths()
+        self.assertEqual(model_path, f"{app.DEFAULT_MODEL_PATH}@{app.MODEL_REVISION}")
+        self.assertEqual(tokenizer_path, f"{app.DEFAULT_AUDIO_TOKENIZER_PATH}@{app.AUDIO_TOKENIZER_REVISION}")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@ Local text-to-speech using [Higgs Audio V2](https://github.com/boson-ai/higgs-au
 
 ## What it does
 
-- **Install** clones `boson-ai/higgs-audio` into `temp_higgs`, installs Python dependencies with `uv`, installs PyTorch via `torch.js`, and downloads Hugging Face model weights into `models/`.
+- **Install** clones `boson-ai/higgs-audio` into `temp_higgs`, installs Python dependencies with `uv`, installs PyTorch via `torch.js`, and downloads Hugging Face model weights into `models/`. Downloads are pinned to the last original-format revisions of `bosonai/higgs-audio-v2-generation-3B-base` and `bosonai/higgs-audio-v2-tokenizer`; the newer Transformers-native conversions of those repos cannot be loaded by `boson_multimodal`, and Install deletes them if present.
 - **Start** runs `python app.py` in the `env` virtualenv and binds Gradio to `127.0.0.1` on an available port. Pinokio captures the printed URL and shows **Open Web UI** when ready.
 - **Update** fast-forwards this repo and `temp_higgs`, then runs the installation flow to refresh dependencies, recover missing models, and verify imports.
 - **Reset** removes `env`, `temp_higgs`, `models/`, and `voice_preset_cache/` so you can reinstall cleanly.

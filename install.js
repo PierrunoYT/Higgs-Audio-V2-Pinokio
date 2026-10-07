@@ -41,11 +41,24 @@ module.exports = {
       }
     },
 
-    // Download Higgs Audio V2 models from Hugging Face
+    // Drop downloads in the converted Transformers-native format (unsupported by boson_multimodal)
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        message: [
+          "python -c \"import app; app.remove_stale_model_dirs()\""
+        ]
+      }
+    },
+
+    // Download Higgs Audio V2 models from Hugging Face, pinned to the last original-format
+    // revisions (keep in sync with MODEL_REVISION / AUDIO_TOKENIZER_REVISION in app.py)
     {
       method: "hf.download",
       params: {
         "_": ["bosonai/higgs-audio-v2-generation-3B-base"],
+        "revision": "10840182ca4ad5d9d9113b60b9bb3c1ef1ba3f84",
         "local-dir": "models/higgs-audio-v2-generation-3B-base"
       }
     },
@@ -54,6 +67,7 @@ module.exports = {
       method: "hf.download",
       params: {
         "_": ["bosonai/higgs-audio-v2-tokenizer"],
+        "revision": "9d4988fbd4ad07b4cac3a5fa462741a41810dbec",
         "local-dir": "models/higgs-audio-v2-tokenizer"
       }
     },
