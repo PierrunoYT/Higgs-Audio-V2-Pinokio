@@ -513,7 +513,12 @@ def text_to_speech(
         raise gr.Error(f"Invalid generation parameter: {e}") from e
 
     if engine is None:
-        model_path, tokenizer_path = resolve_model_and_tokenizer_paths()
+        try:
+            model_path, tokenizer_path = resolve_model_and_tokenizer_paths()
+        except Exception as e:
+            error_msg = f"Error generating speech: failed to obtain model weights: {e}"
+            logger.error(error_msg)
+            raise gr.Error(error_msg) from e
         if not initialize_engine(model_path, tokenizer_path):
             error_msg = "Error generating speech: failed to initialize HiggsAudioServeEngine (see logs above for details)"
             logger.error(error_msg)
@@ -829,7 +834,16 @@ def create_ui():
         stop_btn.click(
             fn=None,
             queue=False,
-            js="() => {const audio = document.querySelector('#generated-audio audio'); if(audio) audio.pause();}",
+            # Gradio's waveform player keeps its <audio> element inside a shadow root
+            js="""() => {
+                const root = document.querySelector('#generated-audio');
+                if (!root) return;
+                const players = [...root.querySelectorAll('audio')];
+                root.querySelectorAll('*').forEach((el) => {
+                    if (el.shadowRoot) players.push(...el.shadowRoot.querySelectorAll('audio'));
+                });
+                players.forEach((audio) => audio.pause());
+            }""",
         )
 
     return demo, my_theme, custom_css

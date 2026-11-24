@@ -1,4 +1,5 @@
 """Construct the real Gradio UI without downloading model weights."""
+import asyncio
 import os
 import unittest
 from unittest.mock import patch
@@ -16,8 +17,13 @@ except ImportError:
 class UITests(unittest.TestCase):
     def test_build_and_api_schema(self):
         app = load_app()
+        # Outside a running loop, Gradio creates event loops it never closes; their finalizer
+        # warnings can fire mid-import and corrupt the import lock on Python 3.10.
+        async def build():
+            return app.create_ui()
+
         with patch.object(app, "gr", gradio):
-            demo, _, _ = app.create_ui()
+            demo, _, _ = asyncio.run(build())
             api = demo.get_api_info()
         self.assertIn("/generate_speech", api["named_endpoints"])
         self.assertEqual(len(api["named_endpoints"]["/generate_speech"]["parameters"]), 12)

@@ -94,6 +94,13 @@ class AppTests(unittest.TestCase):
         with self.assertRaisesRegex(app.gr.Error, "model failed"):
             app.text_to_speech("Hello", "EMPTY")
 
+    def test_model_download_failure_is_api_error(self):
+        with patch.object(app, "resolve_model_and_tokenizer_paths", side_effect=OSError("offline")), \
+             patch.object(app, "initialize_engine") as initialize:
+            with self.assertRaisesRegex(app.gr.Error, "offline"):
+                app.text_to_speech("Hello", "EMPTY")
+        initialize.assert_not_called()
+
     def test_successful_generation(self):
         app.engine = MagicMock()
         app.engine.generate.return_value = types.SimpleNamespace(
